@@ -64,10 +64,11 @@ body.view-archive .view-archive-only{display:block !important}
 #landingView{display:none;text-align:center;padding:38px 20px}
 body.view-landing #landingView{display:block}
 .role-options{
-  display:inline-flex;
-  gap:16px;
+  display:flex;
+  flex-direction:column;
+  gap:18px;
   justify-content:center;
-  flex-wrap:wrap;
+  align-items:stretch;
   margin:22px auto 0;
   padding:24px 28px;
   border-radius:20px;
@@ -75,6 +76,24 @@ body.view-landing #landingView{display:block}
   border:1px solid rgba(255,255,255,.08);
   box-shadow:0 20px 40px rgba(0,0,0,.28);
   backdrop-filter:blur(6px);
+  width:min(100%, 480px);
+}
+.role-options-main,
+.role-options-archive{
+  display:flex;
+  gap:16px;
+  justify-content:center;
+  flex-wrap:wrap;
+}
+.role-options-main .role-btn{
+  flex:1 1 180px;
+}
+.role-options-archive{
+  padding-top:4px;
+}
+.role-options-archive .role-btn{
+  flex:1 1 220px;
+  max-width:320px;
 }
 .role-btn{min-width:160px;font-size:18px;padding:18px 26px}
 .view-badge{
@@ -203,7 +222,12 @@ body.view-pilot .topbar-actions{
   backdrop-filter:blur(8px);
 }
 .archive-grid{align-items:flex-start;gap:20px;}
-.archive-details{min-height:140px;}
+.archive-details{
+  min-height:140px;
+  display:flex;
+  flex-direction:column;
+  gap:16px;
+}
 .archive-card{
   background:var(--input);
   border:1px solid var(--border);
@@ -241,6 +265,127 @@ body.view-pilot .topbar-actions{
   color:var(--text-dim);
 }
 .archive-notes p{margin:0;font-size:14px;line-height:1.4;color:var(--text);}
+.archive-entries{
+  background:var(--input);
+  border:1px solid var(--border);
+  border-radius:var(--radius);
+  padding:16px;
+  display:flex;
+  flex-direction:column;
+  gap:14px;
+}
+.archive-entries-header{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+}
+.archive-entries-header h3{
+  margin:0;
+  font-size:14px;
+  letter-spacing:.08em;
+  text-transform:uppercase;
+  color:var(--text-dim);
+}
+.archive-entries-count{
+  font-size:13px;
+  color:var(--text-dim);
+}
+.archive-entry{
+  border:1px solid rgba(255,255,255,.08);
+  border-radius:var(--radius-sm);
+  padding:14px 16px;
+  background:rgba(12,14,18,.85);
+  display:flex;
+  flex-direction:column;
+  gap:12px;
+}
+.archive-entry-header{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:12px;
+}
+.archive-entry-heading{
+  display:flex;
+  align-items:center;
+  gap:10px;
+}
+.archive-entry-unit{
+  font-size:16px;
+  font-weight:700;
+  letter-spacing:.04em;
+}
+.archive-entry-badge{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:6px;
+  padding:4px 10px;
+  border-radius:999px;
+  font-size:11px;
+  letter-spacing:.12em;
+  text-transform:uppercase;
+  background:rgba(255,255,255,.08);
+  color:var(--text);
+}
+.archive-entry-timestamp{
+  font-size:13px;
+  color:var(--text-dim);
+}
+.archive-entry-grid{
+  display:grid;
+  gap:12px;
+  grid-template-columns:repeat(auto-fit, minmax(160px,1fr));
+}
+.archive-entry-grid div{border:none;padding:0;}
+.archive-entry-grid dt{
+  margin:0 0 4px;
+  font-size:11px;
+  text-transform:uppercase;
+  letter-spacing:.08em;
+  color:var(--text-dim);
+}
+.archive-entry-grid dd{
+  margin:0;
+  font-size:14px;
+  color:var(--text);
+}
+.archive-entry-notes{
+  margin-top:4px;
+  border-top:1px solid rgba(255,255,255,.08);
+  padding-top:10px;
+}
+.archive-entry-notes h4{
+  margin:0 0 6px;
+  font-size:12px;
+  letter-spacing:.08em;
+  text-transform:uppercase;
+  color:var(--text-dim);
+}
+.archive-entry-notes p{
+  margin:0;
+  font-size:14px;
+  line-height:1.45;
+  color:var(--text);
+}
+.archive-entry.status-no-launch{
+  border-color:rgba(255,200,87,.38);
+  background:rgba(43,33,0,.45);
+}
+.archive-entry.status-abort{
+  border-color:rgba(255,93,93,.4);
+  background:rgba(40,10,16,.55);
+}
+.archive-entry-badge.status-no-launch{color:var(--warn);background:rgba(255,200,87,.18);}
+.archive-entry-badge.status-abort{color:var(--danger);background:rgba(255,93,93,.18);}
+.archive-entry-badge.status-completed{color:var(--success);background:rgba(31,198,122,.18);}
+.archive-empty-msg{
+  margin:0;
+  font-size:14px;
+  color:var(--text-dim);
+}
+.archive-entry.status-completed{border-color:rgba(31,198,122,.25);}
 .archive-actions{margin-top:16px;justify-content:flex-start;}
 #archiveMeta{margin-top:8px;color:var(--text-dim);font-size:13px;}
 #archiveEmpty{margin-top:12px;color:var(--text-dim);font-size:14px;}
