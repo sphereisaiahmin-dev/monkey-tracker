@@ -44,7 +44,8 @@ const state = {
   },
   staff: {
     crew: [],
-    pilots: []
+    pilots: [],
+    monkeyLeads: []
   }
 };
 
@@ -96,7 +97,6 @@ const cancelConfigBtn = el('cancelConfig');
 const configForm = el('configForm');
 const configMessage = el('configMessage');
 const unitLabelSelect = el('unitLabelSelect');
-const sqlFilename = el('sqlFilename');
 const webhookEnabled = el('webhookEnabled');
 const webhookUrl = el('webhookUrl');
 const webhookMethod = el('webhookMethod');
@@ -118,6 +118,7 @@ const refreshShowsBtn = el('refreshShows');
 const lanAddressEl = el('lanAddress');
 const pilotListInput = el('pilotList');
 const crewListInput = el('crewList');
+const monkeyLeadListInput = el('monkeyLeadList');
 
 init().catch(err=>{
   console.error(err);
@@ -166,10 +167,8 @@ function initUI(){
   monkeyLeadSelect.addEventListener('change', ()=> updateShowField('monkeyLead', monkeyLeadSelect.value));
 
   const newShowBtn = el('newShow');
-  const dupShowBtn = el('dupShow');
   const addLineBtn = el('addLine');
   if(newShowBtn){ newShowBtn.addEventListener('click', onNewShow); }
-  if(dupShowBtn){ dupShowBtn.addEventListener('click', onDuplicateShow); }
   if(addLineBtn){ addLineBtn.addEventListener('click', onAddLine); }
   if(leadExportCsvBtn){ leadExportCsvBtn.addEventListener('click', onExportCsv); }
   if(leadExportJsonBtn){ leadExportJsonBtn.addEventListener('click', onExportJson); }
@@ -200,6 +199,7 @@ function initUI(){
   cancelConfigBtn.addEventListener('click', ()=> toggleConfig(false));
   document.addEventListener('keydown', e=>{
     if(e.key === 'Escape'){
+      closeAllShowMenus();
       toggleConfig(false);
       closeEditModal();
     }
@@ -237,14 +237,11 @@ function initUI(){
     refreshShowsBtn.addEventListener('click', onRefreshShows);
   }
 
-  window.addEventListener('resize', adjustContainerBottomPadding);
-  if('ResizeObserver' in window){
-    const ro = new ResizeObserver(adjustContainerBottomPadding);
-    const footer = document.querySelector('.sticky-footer');
-    if(footer){
-      ro.observe(footer);
+  document.addEventListener('click', event=>{
+    if(!event.target.closest('.show-menu-wrap')){
+      closeAllShowMenus();
     }
-  }
+  });
 }
 
 async function loadConfig(){
@@ -271,7 +268,6 @@ async function loadConfig(){
   appTitle.textContent = state.unitLabel;
   unitLabelEl.textContent = state.unitLabel;
   unitLabelSelect.value = state.unitLabel;
-  sqlFilename.value = data.sql?.filename || '';
   if(webhookEnabled){ webhookEnabled.checked = state.webhookConfig.enabled; }
   if(webhookUrl){ webhookUrl.value = state.webhookConfig.url; }
   if(webhookMethod){ webhookMethod.value = state.webhookConfig.method; }
@@ -289,14 +285,16 @@ async function loadStaff(){
     const data = await apiRequest('/api/staff');
     const crew = normalizeNameList(Array.isArray(data.crew) ? data.crew : [], {sort: true});
     const pilots = normalizeNameList(Array.isArray(data.pilots) ? data.pilots : [], {sort: true});
-    state.staff = {crew, pilots};
+    const monkeyLeads = normalizeNameList(Array.isArray(data.monkeyLeads) ? data.monkeyLeads : [], {sort: true});
+    state.staff = {crew, pilots, monkeyLeads};
   }catch(err){
     console.error('Failed to load staff', err);
     if(!state.staff){
-      state.staff = {crew: [], pilots: []};
+      state.staff = {crew: [], pilots: [], monkeyLeads: []};
     }else{
       state.staff.crew = [];
       state.staff.pilots = [];
+      state.staff.monkeyLeads = [];
     }
     toast('Failed to load staff directory', true);
   }
@@ -661,6 +659,7 @@ function onPlanLaunchChange(){
 }
 
 async function onNewShow(){
+  closeAllShowMenus();
   try{
     const payload = await apiRequest('/api/shows', {method:'POST', body: JSON.stringify({})});
     upsertShow(payload);
@@ -674,21 +673,22 @@ async function onNewShow(){
   }
 }
 
-async function onDuplicateShow(){
-  const current = getCurrentShow();
-  if(!current){
-    await onNewShow();
+async function duplicateShow(showId){
+  closeAllShowMenus();
+  const source = state.shows.find(show => show.id === showId);
+  if(!source){
+    toast('Show not found', true);
     return;
   }
   try{
     const dupPayload = {
-      date: current.date,
-      time: current.time,
-      label: current.label,
-      crew: [...(current.crew||[])],
-      leadPilot: current.leadPilot || '',
-      monkeyLead: current.monkeyLead || '',
-      notes: current.notes || ''
+      date: source.date,
+      time: source.time,
+      label: source.label,
+      crew: [...(source.crew||[])],
+      leadPilot: source.leadPilot || '',
+      monkeyLead: source.monkeyLead || '',
+      notes: source.notes || ''
     };
     const payload = await apiRequest('/api/shows', {method:'POST', body: JSON.stringify(dupPayload)});
     upsertShow(payload);
@@ -698,7 +698,7 @@ async function onDuplicateShow(){
     toast('Show duplicated');
   }catch(err){
     console.error(err);
-    toast('Failed to duplicate show', true);
+    toast(err.message || 'Failed to duplicate show', true);
   }
 }
 
@@ -806,6 +806,7 @@ function clearEntryForm(){
 
 function renderGroups(){
   sortShows();
+  closeAllShowMenus();
   groupsContainer.innerHTML = '';
   state.shows.forEach(show=>{
     const isOpen = show.id === state.currentShowId;
@@ -813,7 +814,21 @@ function renderGroups(){
     group.className = 'group';
     group.open = isOpen;
     const summary = document.createElement('summary');
-    summary.innerHTML = `<div class="group-title">${groupTitle(show)}</div><div class="badge">${show.entries?.length || 0} entries</div>`;
+    const summaryContent = document.createElement('div');
+    summaryContent.className = 'group-summary';
+    const titleEl = document.createElement('div');
+    titleEl.className = 'group-title';
+    titleEl.textContent = groupTitle(show);
+    const meta = document.createElement('div');
+    meta.className = 'group-summary-meta';
+    const badge = document.createElement('div');
+    badge.className = 'badge';
+    badge.textContent = `${show.entries?.length || 0} entries`;
+    meta.appendChild(badge);
+    meta.appendChild(createShowMenu(show));
+    summaryContent.appendChild(titleEl);
+    summaryContent.appendChild(meta);
+    summary.appendChild(summaryContent);
     summary.addEventListener('click', ()=>{
       setTimeout(()=>{
         if(group.open){
@@ -821,6 +836,7 @@ function renderGroups(){
         }
       }, 0);
     });
+    summary.addEventListener('click', closeAllShowMenus);
     const metricsDiv = document.createElement('div');
     const metrics = computeMetrics(show);
     metricsDiv.className = 'metrics';
@@ -866,8 +882,57 @@ function renderGroups(){
 function groupTitle(show){
   const d = formatDateUS(show.date) || 'MM-DD-YYYY';
   const t = formatTime12Hour(show.time) || 'HH:mm';
-  const label = show.label ? ` • ${escapeHtml(show.label)}` : '';
+  const label = show.label ? ` • ${show.label}` : '';
   return `${d} • ${t}${label}`;
+}
+
+function createShowMenu(show){
+  const wrap = document.createElement('div');
+  wrap.className = 'show-menu-wrap';
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'btn icon-btn show-menu-btn';
+  btn.setAttribute('aria-haspopup', 'true');
+  btn.setAttribute('aria-expanded', 'false');
+  btn.title = 'Show options';
+  btn.setAttribute('aria-label', 'Show options');
+  btn.innerHTML = '⋮';
+  btn.addEventListener('click', event=>{
+    event.preventDefault();
+    event.stopPropagation();
+    const isOpen = wrap.classList.contains('open');
+    closeAllShowMenus();
+    if(!isOpen){
+      wrap.classList.add('open');
+      btn.setAttribute('aria-expanded', 'true');
+    }
+  });
+  const menu = document.createElement('div');
+  menu.className = 'show-menu';
+  const duplicateBtn = document.createElement('button');
+  duplicateBtn.type = 'button';
+  duplicateBtn.className = 'menu-item';
+  duplicateBtn.textContent = 'Duplicate show';
+  duplicateBtn.addEventListener('click', async event=>{
+    event.preventDefault();
+    event.stopPropagation();
+    closeAllShowMenus();
+    await duplicateShow(show.id);
+  });
+  menu.appendChild(duplicateBtn);
+  wrap.appendChild(btn);
+  wrap.appendChild(menu);
+  return wrap;
+}
+
+function closeAllShowMenus(){
+  qsa('.show-menu-wrap.open').forEach(wrap=>{
+    wrap.classList.remove('open');
+    const toggle = qs('.show-menu-btn', wrap);
+    if(toggle){
+      toggle.setAttribute('aria-expanded', 'false');
+    }
+  });
 }
 
 function renderRow(show, entry){
@@ -1110,7 +1175,7 @@ function buildEntryFieldsClone(entry, show){
   fields.push(actionsContainer);
 
   const operatorSelect = document.createElement('select');
-  const pilots = getPilotNames([entry.operator, show?.leadPilot, show?.monkeyLead]);
+  const pilots = getPilotNames([entry.operator, show?.leadPilot]);
   if(pilots.length){
     operatorSelect.innerHTML = '<option value="">Select</option>' + pilots.map(name=>`<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('');
     operatorSelect.disabled = false;
@@ -1227,11 +1292,11 @@ function setView(view){
   }else{
     updatePilotSummary();
   }
-  adjustContainerBottomPadding();
 }
 
 function toggleConfig(open){
   configBtn.setAttribute('aria-expanded', String(open));
+  configBtn.classList.toggle('is-active', open);
   configPanel.classList.toggle('open', open);
   if(open){
     configMessage.textContent = '';
@@ -1242,13 +1307,11 @@ async function onConfigSubmit(event){
   event.preventDefault();
   const staffPayload = {
     pilots: parseStaffTextarea(pilotListInput ? pilotListInput.value : ''),
+    monkeyLeads: parseStaffTextarea(monkeyLeadListInput ? monkeyLeadListInput.value : ''),
     crew: parseStaffTextarea(crewListInput ? crewListInput.value : '')
   };
   const payload = {
     unitLabel: unitLabelSelect.value,
-    sql: {
-      filename: sqlFilename.value.trim()
-    },
     webhook: {
       enabled: webhookEnabled ? webhookEnabled.checked : false,
       url: webhookUrl ? webhookUrl.value.trim() : '',
@@ -1261,6 +1324,7 @@ async function onConfigSubmit(event){
     const savedStaff = await apiRequest('/api/staff', {method: 'PUT', body: JSON.stringify(staffPayload)});
     state.staff = {
       pilots: normalizeNameList(savedStaff?.pilots || [], {sort: true}),
+      monkeyLeads: normalizeNameList(savedStaff?.monkeyLeads || [], {sort: true}),
       crew: normalizeNameList(savedStaff?.crew || [], {sort: true})
     };
     populateStaffSettings();
@@ -1604,14 +1668,6 @@ function csvEscape(value){
   return str;
 }
 
-function adjustContainerBottomPadding(){
-  const container = document.querySelector('.container');
-  const footer = document.querySelector('.sticky-footer');
-  if(!container || !footer){ return; }
-  const footerHeight = Math.ceil(footer.getBoundingClientRect().height);
-  container.style.paddingBottom = `${footerHeight + 12}px`;
-}
-
 function getDefaultUnits(){
   if(state.unitLabel === 'Monkey'){
     return Array.from({length: 12}, (_, i)=> String(i+1));
@@ -1678,6 +1734,9 @@ function populateStaffSettings(){
   if(pilotListInput){
     pilotListInput.value = (state.staff?.pilots || []).join('\n');
   }
+  if(monkeyLeadListInput){
+    monkeyLeadListInput.value = (state.staff?.monkeyLeads || []).join('\n');
+  }
   if(crewListInput){
     crewListInput.value = (state.staff?.crew || []).join('\n');
   }
@@ -1697,6 +1756,10 @@ function getPilotNames(additional = []){
 
 function getCrewNames(additional = []){
   return normalizeNameList([state.staff?.crew || [], additional], {sort: true});
+}
+
+function getMonkeyLeadNames(additional = []){
+  return normalizeNameList([state.staff?.monkeyLeads || [], additional], {sort: true});
 }
 
 function renderCrewOptions(selected = []){
@@ -1719,34 +1782,44 @@ function renderCrewOptions(selected = []){
 }
 
 function renderPilotAssignments(show){
-  if(!leadPilotSelect || !monkeyLeadSelect){
-    return;
-  }
-  const names = getPilotNames([show?.leadPilot, show?.monkeyLead]);
-  if(!names.length){
-    const message = '<option value="">Add pilots in settings</option>';
-    leadPilotSelect.innerHTML = message;
-    monkeyLeadSelect.innerHTML = message;
-    leadPilotSelect.disabled = true;
-    monkeyLeadSelect.disabled = true;
-    return;
-  }
-  const options = [''].concat(names).map(name=>{
-    if(!name){
-      return '<option value="">Select</option>';
+  if(leadPilotSelect){
+    const pilotNames = getPilotNames([show?.leadPilot]);
+    if(!pilotNames.length){
+      leadPilotSelect.innerHTML = '<option value="">Add pilots in settings</option>';
+      leadPilotSelect.disabled = true;
+    }else{
+      const pilotOptions = [''].concat(pilotNames).map(name=>{
+        if(!name){
+          return '<option value="">Select</option>';
+        }
+        return `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`;
+      }).join('');
+      leadPilotSelect.innerHTML = pilotOptions;
+      leadPilotSelect.disabled = false;
+      const leadValue = show?.leadPilot || '';
+      const leadMatch = pilotNames.find(name => name.toLowerCase() === leadValue.toLowerCase());
+      leadPilotSelect.value = leadMatch || '';
     }
-    return `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`;
-  }).join('');
-  leadPilotSelect.innerHTML = options;
-  monkeyLeadSelect.innerHTML = options;
-  leadPilotSelect.disabled = false;
-  monkeyLeadSelect.disabled = false;
-  const leadValue = show?.leadPilot || '';
-  const monkeyValue = show?.monkeyLead || '';
-  const leadMatch = names.find(name => name.toLowerCase() === leadValue.toLowerCase());
-  const monkeyMatch = names.find(name => name.toLowerCase() === monkeyValue.toLowerCase());
-  leadPilotSelect.value = leadMatch || '';
-  monkeyLeadSelect.value = monkeyMatch || '';
+  }
+  if(monkeyLeadSelect){
+    const monkeyNames = getMonkeyLeadNames([show?.monkeyLead]);
+    if(!monkeyNames.length){
+      monkeyLeadSelect.innerHTML = '<option value="">Add monkey leads in settings</option>';
+      monkeyLeadSelect.disabled = true;
+    }else{
+      const monkeyOptions = [''].concat(monkeyNames).map(name=>{
+        if(!name){
+          return '<option value="">Select</option>';
+        }
+        return `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`;
+      }).join('');
+      monkeyLeadSelect.innerHTML = monkeyOptions;
+      monkeyLeadSelect.disabled = false;
+      const monkeyValue = show?.monkeyLead || '';
+      const monkeyMatch = monkeyNames.find(name => name.toLowerCase() === monkeyValue.toLowerCase());
+      monkeyLeadSelect.value = monkeyMatch || '';
+    }
+  }
 }
 
 function normalizeNameList(list = [], options = {}){

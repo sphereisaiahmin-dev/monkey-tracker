@@ -5,6 +5,7 @@ const { v4: uuidv4 } = require('uuid');
 
 const DEFAULT_PILOTS = ['Alex','Nick','John Henery','James','Robert','Nazar'];
 const DEFAULT_CREW = ['Alex','Nick','John Henery','James','Robert','Nazar'];
+const DEFAULT_MONKEY_LEADS = ['Cleo','Bret','Leslie','Dallas'];
 
 class SqlProvider {
   constructor(config = {}){
@@ -165,17 +166,20 @@ class SqlProvider {
   async getStaff(){
     return {
       crew: this._listStaffByRole('crew'),
-      pilots: this._listStaffByRole('pilot')
+      pilots: this._listStaffByRole('pilot'),
+      monkeyLeads: this._listMonkeyLeads()
     };
   }
 
   async replaceStaff(staff = {}){
     const crew = this._normalizeNameList(staff.crew || [], {sort: true});
     const pilots = this._normalizeNameList(staff.pilots || [], {sort: true});
+    const monkeyLeads = this._normalizeNameList(staff.monkeyLeads || [], {sort: true});
     this._replaceStaffRole('crew', crew);
     this._replaceStaffRole('pilot', pilots);
+    this._replaceMonkeyLeads(monkeyLeads);
     await this._persistDatabase();
-    return {crew, pilots};
+    return {crew, pilots, monkeyLeads};
   }
 
   _normalizeShow(raw){
@@ -311,6 +315,25 @@ class SqlProvider {
       `);
     }
 
+    if(!this._tableExists('monkey_leads')){
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS monkey_leads (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        )
+      `);
+      mutated = true;
+    }else{
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS monkey_leads (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        )
+      `);
+    }
+
     return mutated;
   }
 
@@ -324,11 +347,20 @@ class SqlProvider {
       this._replaceStaffRole('crew', this._normalizeNameList(DEFAULT_CREW, {sort: true}));
       mutated = true;
     }
+    if(this._listMonkeyLeads().length === 0){
+      this._replaceMonkeyLeads(this._normalizeNameList(DEFAULT_MONKEY_LEADS, {sort: true}));
+      mutated = true;
+    }
     return mutated;
   }
 
   _listStaffByRole(role){
     const rows = this._select('SELECT name FROM staff WHERE role = ? ORDER BY name COLLATE NOCASE', [role]);
+    return rows.map(row => row.name);
+  }
+
+  _listMonkeyLeads(){
+    const rows = this._select('SELECT name FROM monkey_leads ORDER BY name COLLATE NOCASE');
     return rows.map(row => row.name);
   }
 
@@ -340,6 +372,17 @@ class SqlProvider {
     const timestamp = new Date().toISOString();
     names.forEach(name =>{
       this._run('INSERT INTO staff (id, name, role, created_at) VALUES (?, ?, ?, ?)', [uuidv4(), name, role, timestamp]);
+    });
+  }
+
+  _replaceMonkeyLeads(names){
+    this._run('DELETE FROM monkey_leads');
+    if(!Array.isArray(names) || names.length === 0){
+      return;
+    }
+    const timestamp = new Date().toISOString();
+    names.forEach(name =>{
+      this._run('INSERT INTO monkey_leads (id, name, created_at) VALUES (?, ?, ?)', [uuidv4(), name, timestamp]);
     });
   }
 
