@@ -62,6 +62,14 @@
         <textarea id="webhookHeaders" placeholder="One per line, e.g., Authorization: Bearer token"></textarea>
         <div id="webhookPreview" class="webhook-preview" aria-live="polite"></div>
       </fieldset>
+      <fieldset id="staffFields" class="col-12 provider-fields">
+        <legend>Pilots &amp; crew</legend>
+        <p class="help">Add one name per line. These lists feed the Lead and Pilot workspaces.</p>
+        <label for="pilotList">Pilots</label>
+        <textarea id="pilotList" class="list-input" placeholder="e.g., Alex"></textarea>
+        <label for="crewList">Crew</label>
+        <textarea id="crewList" class="list-input" placeholder="e.g., Jamie"></textarea>
+      </fieldset>
       <fieldset id="exportFields" class="col-12 provider-fields">
         <legend>Lead exports</legend>
         <p class="help">Download the currently selected show for offline analysis.</p>
@@ -107,8 +115,9 @@
           <input id="showLabel" type="text" placeholder="e.g., 7pm Main" />
         </div>
         <div class="col-6">
-          <label>Crew on duty <span class="help">(press Enter to add name)</span></label>
-          <div id="crewInput" class="chip-input" aria-label="Crew on duty input"></div>
+          <label for="showCrew">Crew on duty</label>
+          <select id="showCrew" multiple></select>
+          <p class="help">Hold Ctrl (Cmd on Mac) or Shift to select multiple crew members.</p>
         </div>
         <div class="col-3">
           <label for="leadPilot">Lead Pilot</label>
@@ -207,6 +216,7 @@
         <div class="col-3">
           <label for="operator">Operator</label>
           <select id="operator"></select>
+          <div class="error" id="errOperator" hidden>Required</div>
         </div>
         <div class="col-3">
           <label for="batteryId">Battery ID</label>
