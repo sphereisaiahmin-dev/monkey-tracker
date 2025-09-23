@@ -13,7 +13,9 @@
         <button id="roleHome" class="btn ghost" type="button">← Choose role</button>
         <div class="grow"></div>
         <button id="refreshShows" type="button" class="btn ghost">Refresh data</button>
-        <button id="configBtn" class="btn icon-btn" aria-haspopup="dialog" aria-expanded="false" aria-controls="configPanel" title="Open settings">⚙️</button>
+        <button id="configBtn" class="btn icon-btn hamburger" aria-haspopup="dialog" aria-expanded="false" aria-controls="configPanel" title="Open settings" aria-label="Open settings menu">
+          ☰
+        </button>
       </div>
       <div class="row">
         <h1><span id="appTitle">Drone</span> Tracker</h1>
@@ -69,6 +71,7 @@
         <textarea id="pilotList" class="list-input" placeholder="e.g., Alex"></textarea>
         <label for="crewList">Crew</label>
         <textarea id="crewList" class="list-input" placeholder="e.g., Jamie"></textarea>
+
       </fieldset>
       <fieldset id="exportFields" class="col-12 provider-fields">
         <legend>Lead exports</legend>
@@ -100,7 +103,10 @@
     </section>
 
     <section class="panel view-lead-only" aria-labelledby="showHeaderTitle">
-      <h2 id="showHeaderTitle">Show header</h2>
+      <div class="panel-header">
+        <h2 id="showHeaderTitle">Show header</h2>
+        <button id="newShow" class="btn primary" type="button">Add show</button>
+      </div>
       <div class="grid">
         <div class="col-3">
           <label for="showDate">Date</label>
@@ -239,18 +245,13 @@
           <label for="entryNotes">Notes</label>
           <input id="entryNotes" type="text" placeholder="Short note" />
         </div>
+        <div class="col-12 entry-actions">
+          <button id="addLine" class="btn primary" type="button">Add line</button>
+        </div>
       </div>
     </section>
 
     <section id="groups" class="view-lead-only"></section>
-  </div>
-
-  <div class="sticky-footer" role="contentinfo">
-    <div class="footer-grid">
-      <button id="newShow" class="btn span-4 view-lead-only">New Show</button>
-      <button id="dupShow" class="btn span-4 view-lead-only">Duplicate Current Show</button>
-      <button id="addLine" class="btn primary span-4 view-pilot-only">Add line</button>
-    </div>
   </div>
 
   <div id="editModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="editTitle">

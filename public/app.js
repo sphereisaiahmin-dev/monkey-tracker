@@ -43,8 +43,7 @@ const state = {
     headerCount: 0
   },
   staff: {
-    crew: [],
-    pilots: []
+
   }
 };
 
@@ -119,6 +118,7 @@ const lanAddressEl = el('lanAddress');
 const pilotListInput = el('pilotList');
 const crewListInput = el('crewList');
 
+
 init().catch(err=>{
   console.error(err);
   toast('Failed to initialise application', true);
@@ -166,10 +166,8 @@ function initUI(){
   monkeyLeadSelect.addEventListener('change', ()=> updateShowField('monkeyLead', monkeyLeadSelect.value));
 
   const newShowBtn = el('newShow');
-  const dupShowBtn = el('dupShow');
   const addLineBtn = el('addLine');
   if(newShowBtn){ newShowBtn.addEventListener('click', onNewShow); }
-  if(dupShowBtn){ dupShowBtn.addEventListener('click', onDuplicateShow); }
   if(addLineBtn){ addLineBtn.addEventListener('click', onAddLine); }
   if(leadExportCsvBtn){ leadExportCsvBtn.addEventListener('click', onExportCsv); }
   if(leadExportJsonBtn){ leadExportJsonBtn.addEventListener('click', onExportJson); }
@@ -202,6 +200,7 @@ function initUI(){
     if(e.key === 'Escape'){
       toggleConfig(false);
       closeEditModal();
+      closeAllMenus();
     }
   });
 
@@ -237,14 +236,6 @@ function initUI(){
     refreshShowsBtn.addEventListener('click', onRefreshShows);
   }
 
-  window.addEventListener('resize', adjustContainerBottomPadding);
-  if('ResizeObserver' in window){
-    const ro = new ResizeObserver(adjustContainerBottomPadding);
-    const footer = document.querySelector('.sticky-footer');
-    if(footer){
-      ro.observe(footer);
-    }
-  }
 }
 
 async function loadConfig(){
@@ -289,14 +280,7 @@ async function loadStaff(){
     const data = await apiRequest('/api/staff');
     const crew = normalizeNameList(Array.isArray(data.crew) ? data.crew : [], {sort: true});
     const pilots = normalizeNameList(Array.isArray(data.pilots) ? data.pilots : [], {sort: true});
-    state.staff = {crew, pilots};
-  }catch(err){
-    console.error('Failed to load staff', err);
-    if(!state.staff){
-      state.staff = {crew: [], pilots: []};
-    }else{
-      state.staff.crew = [];
-      state.staff.pilots = [];
+
     }
     toast('Failed to load staff directory', true);
   }
@@ -674,21 +658,21 @@ async function onNewShow(){
   }
 }
 
-async function onDuplicateShow(){
-  const current = getCurrentShow();
-  if(!current){
-    await onNewShow();
+async function duplicateShow(sourceShowId){
+  const source = getShowById(sourceShowId);
+  if(!source){
+    toast('Show not found', true);
     return;
   }
   try{
     const dupPayload = {
-      date: current.date,
-      time: current.time,
-      label: current.label,
-      crew: [...(current.crew||[])],
-      leadPilot: current.leadPilot || '',
-      monkeyLead: current.monkeyLead || '',
-      notes: current.notes || ''
+      date: source.date,
+      time: source.time,
+      label: source.label,
+      crew: Array.isArray(source.crew) ? [...source.crew] : [],
+      leadPilot: source.leadPilot || '',
+      monkeyLead: source.monkeyLead || '',
+      notes: source.notes || ''
     };
     const payload = await apiRequest('/api/shows', {method:'POST', body: JSON.stringify(dupPayload)});
     upsertShow(payload);
@@ -698,7 +682,7 @@ async function onDuplicateShow(){
     toast('Show duplicated');
   }catch(err){
     console.error(err);
-    toast('Failed to duplicate show', true);
+    toast(err.message || 'Failed to duplicate show', true);
   }
 }
 
@@ -813,14 +797,55 @@ function renderGroups(){
     group.className = 'group';
     group.open = isOpen;
     const summary = document.createElement('summary');
-    summary.innerHTML = `<div class="group-title">${groupTitle(show)}</div><div class="badge">${show.entries?.length || 0} entries</div>`;
+    summary.innerHTML = `
+      <div class="group-summary">
+        <div class="group-summary-main">${groupTitle(show)}</div>
+        <div class="group-summary-actions">
+          <span class="badge">${show.entries?.length || 0} entries</span>
+          <div class="menu" data-menu>
+            <button class="menu-btn" type="button" aria-haspopup="true" aria-expanded="false" title="Show actions">⋯</button>
+            <div class="menu-list" role="menu">
+              <button class="menu-item" type="button" role="menuitem" data-duplicate>Duplicate show</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
     summary.addEventListener('click', ()=>{
+      closeAllMenus();
       setTimeout(()=>{
         if(group.open){
           setCurrentShow(show.id, {skipRender: true});
         }
       }, 0);
     });
+    const showMenu = summary.querySelector('[data-menu]');
+    if(showMenu){
+      const menuBtn = showMenu.querySelector('.menu-btn');
+      const duplicateBtn = showMenu.querySelector('[data-duplicate]');
+      menuBtn.addEventListener('click', e=>{
+        e.preventDefault();
+        e.stopPropagation();
+        const open = showMenu.hasAttribute('open');
+        closeAllMenus();
+        if(!open){
+          showMenu.setAttribute('open', '');
+          menuBtn.setAttribute('aria-expanded', 'true');
+          document.addEventListener('click', closeAllMenus, {once: true});
+        }else{
+          menuBtn.setAttribute('aria-expanded', 'false');
+        }
+      });
+      if(duplicateBtn){
+        duplicateBtn.addEventListener('click', async e=>{
+          e.preventDefault();
+          e.stopPropagation();
+          showMenu.removeAttribute('open');
+          menuBtn.setAttribute('aria-expanded', 'false');
+          await duplicateShow(show.id);
+        });
+      }
+    }
     const metricsDiv = document.createElement('div');
     const metrics = computeMetrics(show);
     metricsDiv.className = 'metrics';
@@ -905,10 +930,12 @@ function renderRow(show, entry){
   });
   qs('[data-edit]', row).addEventListener('click', ()=>{
     menu.removeAttribute('open');
+    btn.setAttribute('aria-expanded', 'false');
     openEditModal(show.id, entry.id);
   });
   qs('[data-delete]', row).addEventListener('click', async ()=>{
     menu.removeAttribute('open');
+    btn.setAttribute('aria-expanded', 'false');
     if(confirm('Delete this entry?')){
       await deleteEntry(show.id, entry.id);
     }
@@ -931,7 +958,13 @@ async function deleteEntry(showId, entryId){
 }
 
 function closeAllMenus(){
-  qsa('[data-menu]').forEach(m=>m.removeAttribute('open'));
+  qsa('[data-menu]').forEach(menu=>{
+    menu.removeAttribute('open');
+    const btn = qs('.menu-btn', menu);
+    if(btn){
+      btn.setAttribute('aria-expanded', 'false');
+    }
+  });
 }
 
 function computeMetrics(show){
@@ -1182,9 +1215,7 @@ function renderOperatorOptions(){
     return;
   }
   const current = operator.value;
-  const names = getPilotNames([current]);
-  if(!names.length){
-    operator.innerHTML = '<option value="">Add pilots in settings</option>';
+  
     operator.value = '';
     operator.disabled = true;
     return;
@@ -1227,7 +1258,6 @@ function setView(view){
   }else{
     updatePilotSummary();
   }
-  adjustContainerBottomPadding();
 }
 
 function toggleConfig(open){
@@ -1242,7 +1272,7 @@ async function onConfigSubmit(event){
   event.preventDefault();
   const staffPayload = {
     pilots: parseStaffTextarea(pilotListInput ? pilotListInput.value : ''),
-    crew: parseStaffTextarea(crewListInput ? crewListInput.value : '')
+
   };
   const payload = {
     unitLabel: unitLabelSelect.value,
@@ -1261,7 +1291,7 @@ async function onConfigSubmit(event){
     const savedStaff = await apiRequest('/api/staff', {method: 'PUT', body: JSON.stringify(staffPayload)});
     state.staff = {
       pilots: normalizeNameList(savedStaff?.pilots || [], {sort: true}),
-      crew: normalizeNameList(savedStaff?.crew || [], {sort: true})
+
     };
     populateStaffSettings();
     renderCrewOptions(getCurrentShow()?.crew || []);
@@ -1604,14 +1634,6 @@ function csvEscape(value){
   return str;
 }
 
-function adjustContainerBottomPadding(){
-  const container = document.querySelector('.container');
-  const footer = document.querySelector('.sticky-footer');
-  if(!container || !footer){ return; }
-  const footerHeight = Math.ceil(footer.getBoundingClientRect().height);
-  container.style.paddingBottom = `${footerHeight + 12}px`;
-}
-
 function getDefaultUnits(){
   if(state.unitLabel === 'Monkey'){
     return Array.from({length: 12}, (_, i)=> String(i+1));
@@ -1681,6 +1703,7 @@ function populateStaffSettings(){
   if(crewListInput){
     crewListInput.value = (state.staff?.crew || []).join('\n');
   }
+
 }
 
 function parseStaffTextarea(value){
@@ -1695,8 +1718,7 @@ function getPilotNames(additional = []){
   return normalizeNameList([state.staff?.pilots || [], additional], {sort: true});
 }
 
-function getCrewNames(additional = []){
-  return normalizeNameList([state.staff?.crew || [], additional], {sort: true});
+
 }
 
 function renderCrewOptions(selected = []){
@@ -1706,7 +1728,7 @@ function renderCrewOptions(selected = []){
   const selectedList = normalizeNameList(selected);
   const crewNames = getCrewNames([selectedList]);
   if(!crewNames.length){
-    showCrewSelect.innerHTML = '<option value="">Add crew in settings</option>';
+
     showCrewSelect.disabled = true;
     return;
   }
@@ -1722,31 +1744,7 @@ function renderPilotAssignments(show){
   if(!leadPilotSelect || !monkeyLeadSelect){
     return;
   }
-  const names = getPilotNames([show?.leadPilot, show?.monkeyLead]);
-  if(!names.length){
-    const message = '<option value="">Add pilots in settings</option>';
-    leadPilotSelect.innerHTML = message;
-    monkeyLeadSelect.innerHTML = message;
-    leadPilotSelect.disabled = true;
-    monkeyLeadSelect.disabled = true;
-    return;
-  }
-  const options = [''].concat(names).map(name=>{
-    if(!name){
-      return '<option value="">Select</option>';
-    }
-    return `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`;
-  }).join('');
-  leadPilotSelect.innerHTML = options;
-  monkeyLeadSelect.innerHTML = options;
-  leadPilotSelect.disabled = false;
-  monkeyLeadSelect.disabled = false;
-  const leadValue = show?.leadPilot || '';
-  const monkeyValue = show?.monkeyLead || '';
-  const leadMatch = names.find(name => name.toLowerCase() === leadValue.toLowerCase());
-  const monkeyMatch = names.find(name => name.toLowerCase() === monkeyValue.toLowerCase());
-  leadPilotSelect.value = leadMatch || '';
-  monkeyLeadSelect.value = monkeyMatch || '';
+
 }
 
 function normalizeNameList(list = [], options = {}){

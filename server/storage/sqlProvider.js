@@ -6,6 +6,7 @@ const { v4: uuidv4 } = require('uuid');
 const DEFAULT_PILOTS = ['Alex','Nick','John Henery','James','Robert','Nazar'];
 const DEFAULT_CREW = ['Alex','Nick','John Henery','James','Robert','Nazar'];
 
+
 class SqlProvider {
   constructor(config = {}){
     this.config = config;
@@ -165,17 +166,14 @@ class SqlProvider {
   async getStaff(){
     return {
       crew: this._listStaffByRole('crew'),
-      pilots: this._listStaffByRole('pilot')
+
     };
   }
 
   async replaceStaff(staff = {}){
     const crew = this._normalizeNameList(staff.crew || [], {sort: true});
     const pilots = this._normalizeNameList(staff.pilots || [], {sort: true});
-    this._replaceStaffRole('crew', crew);
-    this._replaceStaffRole('pilot', pilots);
-    await this._persistDatabase();
-    return {crew, pilots};
+
   }
 
   _normalizeShow(raw){
@@ -311,6 +309,7 @@ class SqlProvider {
       `);
     }
 
+
     return mutated;
   }
 
@@ -324,6 +323,7 @@ class SqlProvider {
       this._replaceStaffRole('crew', this._normalizeNameList(DEFAULT_CREW, {sort: true}));
       mutated = true;
     }
+
     return mutated;
   }
 
@@ -331,6 +331,7 @@ class SqlProvider {
     const rows = this._select('SELECT name FROM staff WHERE role = ? ORDER BY name COLLATE NOCASE', [role]);
     return rows.map(row => row.name);
   }
+
 
   _replaceStaffRole(role, names){
     this._run('DELETE FROM staff WHERE role = ?', [role]);
@@ -342,6 +343,7 @@ class SqlProvider {
       this._run('INSERT INTO staff (id, name, role, created_at) VALUES (?, ?, ?, ?)', [uuidv4(), name, role, timestamp]);
     });
   }
+
 
   _normalizeNameList(list = [], options = {}){
     const {sort = false} = options;
