@@ -40,6 +40,27 @@ a{color:var(--primary);text-decoration:none}
   margin:0 auto;
   padding:14px 16px 120px;
 }
+#roleHome{display:none}
+body.view-lead #roleHome,
+body.view-pilot #roleHome{display:inline-flex}
+#viewBadge{display:none}
+body.view-lead #viewBadge,
+body.view-pilot #viewBadge{display:inline-flex}
+body.view-landing #refreshShows{display:none}
+body.view-landing .sticky-footer{display:none}
+.view-lead-only,
+.view-pilot-only,
+.view-landing-only{display:none !important}
+body.view-lead .view-lead-only{display:block !important}
+body.view-pilot .view-pilot-only{display:block !important}
+body.view-landing .view-landing-only{display:block !important}
+#landingView{display:none;text-align:center;padding:38px 20px}
+body.view-landing #landingView{display:block}
+.role-options{display:flex;gap:16px;justify-content:center;flex-wrap:wrap;margin-top:22px}
+.role-btn{min-width:160px;font-size:18px;padding:18px 26px}
+.view-badge{background:rgba(74,163,255,.18);color:#aed4ff;border-color:rgba(74,163,255,.45)}
+.view-badge-pilot{background:rgba(31,198,122,.22);color:#bff7d9;border-color:rgba(31,198,122,.5)}
+#pilotShowSummary{margin-top:8px;padding:10px 12px;border:1px dashed var(--border);border-radius:10px;background:rgba(255,255,255,.03);color:var(--text-dim);font-size:13px;text-align:left}
 .topbar{
   position:sticky;top:0;z-index:50;
   background:linear-gradient(to bottom, rgba(14,15,18,.95), rgba(14,15,18,.85) 60%, transparent);
@@ -123,7 +144,7 @@ input:disabled, select:disabled, textarea:disabled{opacity:.55; cursor:not-allow
   background-clip: padding-box;
 }
 textarea{min-height:84px; resize:vertical}
-input:focus, select:focus, textarea:focus, .btn:focus-visible, .chip-input input:focus{
+input:focus, select:focus, textarea:focus, .btn:focus-visible{
   border-color:var(--focus);
   box-shadow:0 0 0 3px rgba(154, 210, 255, 0.95);
 }
@@ -168,21 +189,19 @@ input:focus, select:focus, textarea:focus, .btn:focus-visible, .chip-input input
   .footer-grid .span-2,.footer-grid .span-3,.footer-grid .span-4{grid-column:span 12}
 }
 
-.chips{display:flex;gap:8px;flex-wrap:wrap}
-.chip{
-  background:var(--chip); border:1px solid var(--border);
-  border-radius:999px; padding:8px 12px; min-height:var(--tap-min);
-  display:inline-flex; align-items:center; gap:8px; color:var(--text);
-}
-.chip .x{background:transparent; border:none; color:var(--text-dim); cursor:pointer; font-size:18px; line-height:1; padding:0; width:24px; height:24px}
-.chip-input{
-  display:flex; align-items:center; flex-wrap:wrap; gap:8px; background:var(--input); border:1px solid var(--border);
-  border-radius:10px; padding:8px; min-height:var(--tap-min);
-}
-.chip-input input{
-  border:none;background:transparent; min-height:32px; padding:8px;
-  flex:1; outline:none;
-}
+.roster-grid{align-items:flex-start}
+.roster-input{display:flex; gap:10px; align-items:center}
+.roster-input input{flex:1}
+.roster-list{list-style:none; margin:8px 0 0; padding:0; border:1px solid var(--border); border-radius:12px; background:var(--input);
+  max-height:200px; overflow-y:auto;}
+.roster-list li{display:flex; align-items:center; justify-content:space-between; gap:12px; padding:8px 12px; border-bottom:1px solid rgba(255,255,255,.06);}
+.roster-list li:last-child{border-bottom:none}
+.roster-list li span{flex:1; word-break:break-word;}
+.roster-list .empty{padding:14px 12px; text-align:center; color:var(--text-dim); font-style:italic;}
+.roster-remove{background:transparent; border:1px solid transparent; color:var(--text-dim); cursor:pointer; font-size:18px; line-height:1;
+  width:30px; height:30px; display:grid; place-items:center; border-radius:50%;}
+.roster-remove:hover{color:var(--danger); border-color:rgba(255,93,93,.4);}
+select[multiple]{min-height:160px; padding-top:10px; padding-bottom:10px;}
 
 .pills{display:flex; gap:8px; flex-wrap:wrap}
 .pill{

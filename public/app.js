@@ -12,7 +12,6 @@ const ISSUE_MAP = {
 };
 const PRIMARY_ISSUES = Object.keys(ISSUE_MAP);
 const ACTIONS = ['Reboot','Swap battery','Swap drone','Retry launch','Abort segment','Logged only'];
-const DEFAULT_CREW = ['Alex','Nick','John Henery','James','Robert','Nazar'];
 const STATUS = ['Completed','No-launch','Abort'];
 const EXPORT_COLUMNS = [
   'showId','showDate','showTime','showLabel','crew','leadPilot','monkeyLead','showNotes',
@@ -25,6 +24,7 @@ const state = {
   unitLabel: 'Drone',
   shows: [],
   currentShowId: null,
+  currentView: 'landing',
   editingEntryRef: null,
   serverHost: '10.241.211.120',
   serverPort: 3000,
@@ -41,6 +41,10 @@ const state = {
     method: 'POST',
     hasSecret: false,
     headerCount: 0
+  },
+  roster: {
+    pilots: [],
+    crew: []
   }
 };
 
@@ -50,7 +54,7 @@ const showDate = el('showDate');
 const showTime = el('showTime');
 const showLabel = el('showLabel');
 const showNotes = el('showNotes');
-const crewInput = el('crewInput');
+const crewSelect = el('crewSelect');
 const leadPilotSelect = el('leadPilot');
 const monkeyLeadSelect = el('monkeyLead');
 const unitId = el('unitId');
@@ -90,11 +94,25 @@ const webhookMethod = el('webhookMethod');
 const webhookSecret = el('webhookSecret');
 const webhookHeaders = el('webhookHeaders');
 const webhookPreview = el('webhookPreview');
+const roleHomeBtn = el('roleHome');
+const viewBadge = el('viewBadge');
+const chooseLeadBtn = el('chooseLead');
+const choosePilotBtn = el('choosePilot');
+const entryShowSelect = el('entryShowSelect');
+const pilotShowSummary = el('pilotShowSummary');
+const leadExportCsvBtn = el('leadExportCsv');
+const leadExportJsonBtn = el('leadExportJson');
 const connectionStatusEl = el('connectionStatus');
 const providerBadge = el('providerBadge');
 const webhookBadge = el('webhookBadge');
 const refreshShowsBtn = el('refreshShows');
 const lanAddressEl = el('lanAddress');
+const newPilotNameInput = el('newPilotName');
+const addPilotBtn = el('addPilotBtn');
+const pilotList = el('pilotList');
+const newCrewNameInput = el('newCrewName');
+const addCrewBtn = el('addCrewBtn');
+const crewList = el('crewList');
 
 init().catch(err=>{
   console.error(err);
@@ -103,17 +121,19 @@ init().catch(err=>{
 
 async function init(){
   await loadConfig();
+  const rosterLoaded = await loadRoster();
+  if(!rosterLoaded){
+    toast('Failed to load roster data', true);
+  }
   updateConnectionIndicator('loading');
   await loadShows();
   initUI();
-  fillHeader(getCurrentShow());
-  renderGroups();
-  updateIssueVisibility();
   populateUnitOptions();
   populateIssues();
   renderActionsChips(actionsChips, []);
-  renderOperatorOptions();
-  adjustContainerBottomPadding();
+  setCurrentShow(state.currentShowId || null);
+  refreshRosterDependentUI();
+  setView('landing');
 }
 
 function initUI(){
@@ -137,11 +157,42 @@ function initUI(){
   leadPilotSelect.addEventListener('change', ()=> updateShowField('leadPilot', leadPilotSelect.value));
   monkeyLeadSelect.addEventListener('change', ()=> updateShowField('monkeyLead', monkeyLeadSelect.value));
 
-  el('newShow').addEventListener('click', onNewShow);
-  el('dupShow').addEventListener('click', onDuplicateShow);
-  el('addLine').addEventListener('click', onAddLine);
-  el('exportCsv').addEventListener('click', onExportCsv);
-  el('exportJson').addEventListener('click', onExportJson);
+  const newShowBtn = el('newShow');
+  const dupShowBtn = el('dupShow');
+  const addLineBtn = el('addLine');
+  if(newShowBtn){ newShowBtn.addEventListener('click', onNewShow); }
+  if(dupShowBtn){ dupShowBtn.addEventListener('click', onDuplicateShow); }
+  if(addLineBtn){ addLineBtn.addEventListener('click', onAddLine); }
+  if(crewSelect){
+    crewSelect.addEventListener('change', ()=>{
+      const show = getCurrentShow();
+      if(!show){
+        return;
+      }
+      const selected = Array.from(crewSelect.selectedOptions).map(option => option.value);
+      updateShowField('crew', selected);
+    });
+  }
+  if(leadExportCsvBtn){ leadExportCsvBtn.addEventListener('click', onExportCsv); }
+  if(leadExportJsonBtn){ leadExportJsonBtn.addEventListener('click', onExportJson); }
+
+  if(entryShowSelect){
+    entryShowSelect.addEventListener('change', ()=>{
+      setCurrentShow(entryShowSelect.value || null);
+    });
+  }
+  if(chooseLeadBtn){
+    chooseLeadBtn.addEventListener('click', ()=>{
+      setView('lead');
+      setCurrentShow(state.currentShowId || (state.shows[0]?.id ?? null));
+    });
+  }
+  if(choosePilotBtn){
+    choosePilotBtn.addEventListener('click', ()=> setView('pilot'));
+  }
+  if(roleHomeBtn){
+    roleHomeBtn.addEventListener('click', ()=> setView('landing'));
+  }
 
   el('closeEdit').addEventListener('click', closeEditModal);
   el('saveEdit').addEventListener('click', saveEditEntry);
@@ -181,6 +232,46 @@ function initUI(){
   if(webhookHeaders){
     webhookHeaders.addEventListener('input', ()=>{
       updateWebhookPreview();
+    });
+  }
+  if(addPilotBtn){
+    addPilotBtn.addEventListener('click', onAddPilot);
+  }
+  if(newPilotNameInput){
+    newPilotNameInput.addEventListener('keydown', e=>{
+      if(e.key === 'Enter'){
+        e.preventDefault();
+        onAddPilot();
+      }
+    });
+  }
+  if(pilotList){
+    pilotList.addEventListener('click', e=>{
+      const btn = e.target.closest('[data-remove-pilot]');
+      if(btn){
+        e.preventDefault();
+        onRemovePilot(btn.dataset.removePilot);
+      }
+    });
+  }
+  if(addCrewBtn){
+    addCrewBtn.addEventListener('click', onAddCrewMember);
+  }
+  if(newCrewNameInput){
+    newCrewNameInput.addEventListener('keydown', e=>{
+      if(e.key === 'Enter'){
+        e.preventDefault();
+        onAddCrewMember();
+      }
+    });
+  }
+  if(crewList){
+    crewList.addEventListener('click', e=>{
+      const btn = e.target.closest('[data-remove-crew]');
+      if(btn){
+        e.preventDefault();
+        onRemoveCrewMember(btn.dataset.removeCrew);
+      }
     });
   }
   if(refreshShowsBtn){
@@ -235,8 +326,32 @@ async function loadConfig(){
   updateWebhookPreview();
 }
 
+async function loadRoster(){
+  let success = true;
+  try{
+    const data = await apiRequest('/api/roster');
+    const pilots = Array.isArray(data?.pilots)
+      ? data.pilots.map(normalizeRosterItem).filter(Boolean)
+      : [];
+    const crew = Array.isArray(data?.crew)
+      ? data.crew.map(normalizeRosterItem).filter(Boolean)
+      : [];
+    state.roster = {
+      pilots: pilots.sort(sortRosterItems),
+      crew: crew.sort(sortRosterItems)
+    };
+  }catch(err){
+    console.error('Failed to load roster', err);
+    state.roster = {pilots: [], crew: []};
+    success = false;
+  }
+  refreshRosterDependentUI();
+  return success;
+}
+
 async function loadShows(){
   try{
+    const previousId = state.currentShowId;
     const data = await apiRequest('/api/shows');
     state.storageLabel = 'SQL.js storage v2';
     state.webhookStatus = {
@@ -247,7 +362,8 @@ async function loadShows(){
     };
     state.shows = Array.isArray(data.shows) ? data.shows : [];
     sortShows();
-    state.currentShowId = state.shows[0]?.id || null;
+    const fallbackId = state.shows[0]?.id || null;
+    state.currentShowId = previousId && state.shows.some(show=>show.id===previousId) ? previousId : fallbackId;
     updateConnectionIndicator();
     updateWebhookPreview();
   }catch(err){
@@ -269,10 +385,7 @@ async function onRefreshShows(){
   updateConnectionIndicator('loading');
   try{
     await loadShows();
-    fillHeader(getCurrentShow());
-    renderGroups();
-    updateIssueVisibility();
-    renderOperatorOptions();
+    setCurrentShow(state.currentShowId || null);
     toast('Data refreshed');
   }catch(err){
     console.error('Failed to refresh shows', err);
@@ -290,6 +403,72 @@ function getCurrentShow(){
     return null;
   }
   return state.shows.find(s=>s.id===state.currentShowId) || null;
+}
+
+function setCurrentShow(showId, options = {}){
+  const {skipPilotSync = false, skipRender = false} = options;
+  state.currentShowId = showId || null;
+  const show = getCurrentShow();
+  fillHeader(show);
+  renderOperatorOptions();
+  updateIssueVisibility();
+  if(!skipRender){
+    renderGroups();
+  }
+  updateWebhookPreview();
+  if(!skipPilotSync){
+    syncPilotShowSelect();
+  }else{
+    updatePilotSummary();
+  }
+}
+
+function syncPilotShowSelect(){
+  if(!entryShowSelect){
+    updatePilotSummary();
+    return;
+  }
+  const shows = state.shows.slice();
+  if(!shows.length){
+    entryShowSelect.innerHTML = '<option value="">No shows available</option>';
+    entryShowSelect.disabled = true;
+    entryShowSelect.value = '';
+    updatePilotSummary();
+    return;
+  }
+  entryShowSelect.disabled = false;
+  entryShowSelect.innerHTML = shows.map(show=>{
+    const date = formatDateUS(show.date) || 'MM-DD-YYYY';
+    const time = formatTime12Hour(show.time) || 'HH:mm';
+    const label = show.label ? ` • ${show.label}` : '';
+    return `<option value="${show.id}">${escapeHtml(`${date} • ${time}${label}`)}</option>`;
+  }).join('');
+  const hasCurrent = state.currentShowId && shows.some(show=>show.id===state.currentShowId);
+  const selectedId = hasCurrent ? state.currentShowId : shows[0].id;
+  entryShowSelect.value = selectedId;
+  if(!hasCurrent){
+    setCurrentShow(selectedId, {skipPilotSync: true});
+  }else{
+    updatePilotSummary();
+  }
+}
+
+function updatePilotSummary(){
+  if(!pilotShowSummary){
+    return;
+  }
+  const show = getCurrentShow();
+  if(!show){
+    pilotShowSummary.textContent = 'Lead must create a show before logging entries.';
+    return;
+  }
+  const date = formatDateUS(show.date) || 'Date TBD';
+  const time = formatTime12Hour(show.time) || 'Time TBD';
+  const parts = [`Logging to ${date} • ${time}`];
+  if(show.label){ parts.push(show.label); }
+  if(show.leadPilot){ parts.push(`Lead: ${show.leadPilot}`); }
+  if(show.monkeyLead){ parts.push(`Monkey lead: ${show.monkeyLead}`); }
+  pilotShowSummary.textContent = parts.join(' • ');
 }
 
 function upsertShow(show){
@@ -316,24 +495,73 @@ function fillHeader(show){
     showTime.value = '';
     showLabel.value = '';
     showNotes.value = '';
-    initCrewChipInput(crewInput, [], ()=>{});
-    leadPilotSelect.innerHTML = '<option value="">Select</option>';
-    monkeyLeadSelect.innerHTML = '<option value="">Select</option>';
+    renderCrewSelect(null);
+    renderPilotSelectors(null);
     return;
   }
   showDate.value = show.date || '';
   showTime.value = show.time || '';
   showLabel.value = show.label || '';
   showNotes.value = show.notes || '';
-  initCrewChipInput(crewInput, show.crew || [], names=>{
-    updateShowField('crew', names);
-    renderOperatorOptions();
+  renderCrewSelect(show);
+  renderPilotSelectors(show);
+}
+
+function renderCrewSelect(show){
+  if(!crewSelect){
+    return;
+  }
+  if(!show){
+    crewSelect.innerHTML = '';
+    crewSelect.disabled = true;
+    return;
+  }
+  const selected = Array.isArray(show.crew) ? show.crew.filter(Boolean) : [];
+  const crewNames = getCrewNames();
+  const optionMap = new Map();
+  crewNames.forEach(name => optionMap.set(name.toLowerCase(), name));
+  selected.forEach(name => {
+    const key = name.toLowerCase();
+    if(!optionMap.has(key)){
+      optionMap.set(key, name);
+    }
   });
-  renderOperatorOptions();
-  const crewOptions = [''].concat(show.crew || [], DEFAULT_CREW);
-  const uniqueOptions = [...new Set(crewOptions.filter(Boolean))];
-  leadPilotSelect.innerHTML = '<option value="">Select</option>' + uniqueOptions.map(name=>`<option ${show.leadPilot===name?'selected':''}>${escapeHtml(name)}</option>`).join('');
-  monkeyLeadSelect.innerHTML = '<option value="">Select</option>' + uniqueOptions.map(name=>`<option ${show.monkeyLead===name?'selected':''}>${escapeHtml(name)}</option>`).join('');
+  crewSelect.innerHTML = '';
+  const options = Array.from(optionMap.values()).sort((a, b)=> a.localeCompare(b, undefined, {sensitivity: 'base'}));
+  options.forEach(name =>{
+    const option = document.createElement('option');
+    option.value = name;
+    option.textContent = name;
+    option.selected = selected.some(sel => sel.toLowerCase() === name.toLowerCase());
+    crewSelect.appendChild(option);
+  });
+  crewSelect.disabled = options.length === 0;
+}
+
+function renderPilotSelectors(show){
+  if(!leadPilotSelect || !monkeyLeadSelect){
+    return;
+  }
+  const currentLead = show?.leadPilot || '';
+  const currentMonkey = show?.monkeyLead || '';
+  const pilotNames = getPilotNames();
+  const optionMap = new Map();
+  pilotNames.forEach(name => optionMap.set(name.toLowerCase(), name));
+  [currentLead, currentMonkey].filter(Boolean).forEach(name =>{
+    const key = name.toLowerCase();
+    if(!optionMap.has(key)){
+      optionMap.set(key, name);
+    }
+  });
+  const options = Array.from(optionMap.values()).sort((a, b)=> a.localeCompare(b, undefined, {sensitivity: 'base'}));
+  const buildOptions = ()=>['<option value="">Select</option>'].concat(options.map(name=>`<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`)).join('');
+  leadPilotSelect.innerHTML = buildOptions();
+  monkeyLeadSelect.innerHTML = buildOptions();
+  leadPilotSelect.value = currentLead || '';
+  monkeyLeadSelect.value = currentMonkey || '';
+  const disable = !show;
+  leadPilotSelect.disabled = disable || options.length === 0;
+  monkeyLeadSelect.disabled = disable || options.length === 0;
 }
 
 function populateUnitOptions(){
@@ -412,14 +640,12 @@ async function onNewShow(){
   try{
     const payload = await apiRequest('/api/shows', {method:'POST', body: JSON.stringify({})});
     upsertShow(payload);
-    state.currentShowId = payload.id;
-    fillHeader(payload);
+    setCurrentShow(payload.id);
     clearEntryForm();
-    renderGroups();
     toast('New show created');
   }catch(err){
     console.error(err);
-    toast('Failed to create show', true);
+    toast(err.message || 'Failed to create show', true);
   }
 }
 
@@ -441,14 +667,12 @@ async function onDuplicateShow(){
     };
     const payload = await apiRequest('/api/shows', {method:'POST', body: JSON.stringify(dupPayload)});
     upsertShow(payload);
-    state.currentShowId = payload.id;
-    fillHeader(payload);
+    setCurrentShow(payload.id);
     clearEntryForm();
-    renderGroups();
     toast('Show duplicated');
   }catch(err){
     console.error(err);
-    toast('Failed to duplicate show', true);
+    toast(err.message || 'Failed to duplicate show', true);
   }
 }
 
@@ -460,21 +684,22 @@ async function updateShowField(field, value){
   try{
     const updated = await apiRequest(`/api/shows/${show.id}`, {method:'PUT', body: JSON.stringify({[field]: value})});
     upsertShow(updated);
-    state.currentShowId = updated.id;
-    if(field === 'crew'){
-      renderOperatorOptions();
-    }
-    renderGroups();
+    setCurrentShow(updated.id);
   }catch(err){
     console.error(err);
-    toast('Failed to update show', true);
+    toast(err.message || 'Failed to update show', true);
+    setCurrentShow(show.id, {skipPilotSync: true});
   }
 }
 
 async function onAddLine(){
+  if(state.currentView !== 'pilot'){
+    toast('Switch to the Pilot workspace to log entries', true);
+    return;
+  }
   const show = getCurrentShow();
   if(!show){
-    toast('Create a show first', true);
+    toast('Select or create a show first', true);
     return;
   }
   clearErrors();
@@ -489,6 +714,7 @@ async function onAddLine(){
   if(planned.value === 'No' && st !== 'No-launch'){ showError('errStatus'); toast('If Planned is No, Status must be No-launch', true); ok=false; }
   if(launched.value === 'No' && st !== 'No-launch'){ showError('errStatus'); toast('If Launched is No, Status must be No-launch', true); ok=false; }
   if(launched.value === 'Yes' && st === 'No-launch'){ showError('errStatus'); toast('If Launched is Yes, Status cannot be No-launch', true); ok=false; }
+  if(!operator.value){ showError('errOperator'); ok=false; }
   if(st !== 'Completed'){
     if(!primaryIssue.value){ showError('errPrimary'); ok=false; }
     if(!severity.value){ showError('errSeverity'); ok=false; }
@@ -499,6 +725,16 @@ async function onAddLine(){
     if(!Number.isFinite(v) || v < 0){ showError('errDelay'); ok=false; }
   }
   if(!ok){ return; }
+
+  const operatorName = operator.value.trim();
+  const duplicate = (show.entries || []).some(entry =>
+    entry.operator && entry.operator.toLowerCase() === operatorName.toLowerCase()
+  );
+  if(duplicate){
+    showError('errOperator');
+    toast('Pilot already logged for this show', true);
+    return;
+  }
 
   const entry = {
     unitId: unitId.value,
@@ -511,7 +747,7 @@ async function onAddLine(){
     severity: st === 'Completed' ? '' : (severity.value || ''),
     rootCause: st === 'Completed' ? '' : (rootCause.value || ''),
     actions: st === 'Completed' ? [] : getSelectedActions(actionsChips),
-    operator: operator.value || '',
+    operator: operatorName,
     batteryId: batteryId.value.trim(),
     delaySec: delaySec.value ? Number(delaySec.value) : null,
     commandRx: commandRx.value || '',
@@ -520,15 +756,13 @@ async function onAddLine(){
 
   try{
     await apiRequest(`/api/shows/${show.id}/entries`, {method:'POST', body: JSON.stringify(entry)});
-    const updatedShow = await apiRequest(`/api/shows/${show.id}`, {method:'GET'});
-    upsertShow(updatedShow);
-    state.currentShowId = updatedShow.id;
+    await loadShows();
+    setCurrentShow(show.id);
     clearEntryForm();
-    renderGroups();
     toast('Line added');
   }catch(err){
     console.error(err);
-    toast('Failed to add entry', true);
+    toast(err.message || 'Failed to add entry', true);
   }
 }
 
@@ -564,9 +798,7 @@ function renderGroups(){
     summary.addEventListener('click', ()=>{
       setTimeout(()=>{
         if(group.open){
-          state.currentShowId = show.id;
-          fillHeader(show);
-          renderOperatorOptions();
+          setCurrentShow(show.id, {skipRender: true});
         }
       }, 0);
     });
@@ -668,13 +900,12 @@ function renderRow(show, entry){
 async function deleteEntry(showId, entryId){
   try{
     await apiRequest(`/api/shows/${showId}/entries/${entryId}`, {method:'DELETE'});
-    const updatedShow = await apiRequest(`/api/shows/${showId}`, {method:'GET'});
-    upsertShow(updatedShow);
-    renderGroups();
+    await loadShows();
+    setCurrentShow(showId);
     toast('Entry deleted');
   }catch(err){
     console.error(err);
-    toast('Failed to delete entry', true);
+    toast(err.message || 'Failed to delete entry', true);
   }
 }
 
@@ -762,22 +993,34 @@ async function saveEditEntry(){
     severity: status === 'Completed' ? '' : sev,
     rootCause: status === 'Completed' ? '' : get('edit_rootCause').value,
     actions: status === 'Completed' ? [] : getSelectedActions(qs('#edit_actionsChips', form)),
-    operator: get('edit_operator').value || '',
+    operator: (get('edit_operator').value || '').trim(),
     batteryId: get('edit_batteryId').value.trim(),
     delaySec: get('edit_delaySec').value ? Number(get('edit_delaySec').value) : null,
     commandRx: get('edit_commandRx').value || '',
     notes: get('edit_entryNotes').value.trim()
   };
+  if(!entryUpdate.operator){
+    toast('Pilot/operator is required', true);
+    return;
+  }
+  const duplicateOperator = (show.entries || []).some(e =>
+    e.id !== state.editingEntryRef.entryId &&
+    e.operator &&
+    e.operator.toLowerCase() === entryUpdate.operator.toLowerCase()
+  );
+  if(duplicateOperator){
+    toast('Pilot already logged for this show', true);
+    return;
+  }
   try{
     await apiRequest(`/api/shows/${show.id}/entries/${state.editingEntryRef.entryId}`, {method:'PUT', body: JSON.stringify(entryUpdate)});
-    const updatedShow = await apiRequest(`/api/shows/${show.id}`, {method:'GET'});
-    upsertShow(updatedShow);
-    renderGroups();
+    await loadShows();
+    setCurrentShow(show.id);
     closeEditModal();
     toast('Entry updated');
   }catch(err){
     console.error(err);
-    toast('Failed to update entry', true);
+    toast(err.message || 'Failed to update entry', true);
   }
 }
 
@@ -855,8 +1098,16 @@ function buildEntryFieldsClone(entry, show){
   fields.push(actionsContainer);
 
   const operatorSelect = document.createElement('select');
-  const crew = [...new Set([...(show?.crew || []), ...(entry.operator ? [entry.operator] : []), ...DEFAULT_CREW])];
-  operatorSelect.innerHTML = '<option value="">Select</option>' + crew.map(name=>`<option ${entry.operator===name?'selected':''}>${escapeHtml(name)}</option>`).join('');
+  const pilotMap = new Map();
+  getPilotNames().forEach(name => pilotMap.set(name.toLowerCase(), name));
+  if(entry.operator){
+    const key = entry.operator.toLowerCase();
+    if(!pilotMap.has(key)){
+      pilotMap.set(key, entry.operator);
+    }
+  }
+  const pilotOptions = Array.from(pilotMap.values()).sort((a, b)=> a.localeCompare(b, undefined, {sensitivity: 'base'}));
+  operatorSelect.innerHTML = '<option value="">Select</option>' + pilotOptions.map(name=>`<option ${entry.operator===name?'selected':''} value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('');
   fields.push(wrap(createLabelWrap('edit_operator', 'Operator', operatorSelect)));
 
   const battery = document.createElement('input');
@@ -915,10 +1166,209 @@ function pillGet(formRoot){
 }
 
 function renderOperatorOptions(){
+  if(!operator){
+    return;
+  }
   const show = getCurrentShow();
-  const names = new Set([...(show?.crew || []), ...DEFAULT_CREW]);
+  if(!show){
+    operator.innerHTML = '<option value="">Select</option>';
+    operator.value = '';
+    operator.disabled = true;
+    return;
+  }
+  const pilotNames = getPilotNames();
   const current = operator.value;
-  operator.innerHTML = '<option value="">Select</option>' + Array.from(names).map(name=>`<option ${current===name?'selected':''}>${escapeHtml(name)}</option>`).join('');
+  const existingEntries = (show.entries || []).map(entry => entry.operator).filter(Boolean);
+  const optionMap = new Map();
+  pilotNames.forEach(name => optionMap.set(name.toLowerCase(), name));
+  existingEntries.forEach(name =>{
+    const key = name.toLowerCase();
+    if(!optionMap.has(key)){
+      optionMap.set(key, name);
+    }
+  });
+  if(current){
+    const key = current.toLowerCase();
+    if(!optionMap.has(key)){
+      optionMap.set(key, current);
+    }
+  }
+  const options = Array.from(optionMap.values()).sort((a, b)=> a.localeCompare(b, undefined, {sensitivity: 'base'}));
+  operator.innerHTML = '<option value="">Select</option>' + options.map(name=>`<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('');
+  if(current && options.some(name => name.toLowerCase() === current.toLowerCase())){
+    const match = options.find(name => name.toLowerCase() === current.toLowerCase());
+    operator.value = match || '';
+  }else{
+    operator.value = '';
+  }
+  operator.disabled = options.length === 0;
+}
+
+function getPilotNames(){
+  return state.roster.pilots.map(item => item.name).filter(Boolean);
+}
+
+function getCrewNames(){
+  return state.roster.crew.map(item => item.name).filter(Boolean);
+}
+
+function refreshRosterDependentUI(){
+  renderRosterSettings();
+  const show = getCurrentShow();
+  renderCrewSelect(show);
+  renderPilotSelectors(show);
+  renderOperatorOptions();
+}
+
+function renderRosterSettings(){
+  if(pilotList){
+    pilotList.innerHTML = '';
+    if(!state.roster.pilots.length){
+      const li = document.createElement('li');
+      li.className = 'empty';
+      li.textContent = 'No pilots yet';
+      pilotList.appendChild(li);
+    }else{
+      state.roster.pilots.forEach(pilot =>{
+        const li = document.createElement('li');
+        li.innerHTML = `<span>${escapeHtml(pilot.name)}</span><button type="button" class="roster-remove" data-remove-pilot="${pilot.id}" aria-label="Remove ${escapeHtml(pilot.name)}">×</button>`;
+        pilotList.appendChild(li);
+      });
+    }
+  }
+  if(crewList){
+    crewList.innerHTML = '';
+    if(!state.roster.crew.length){
+      const li = document.createElement('li');
+      li.className = 'empty';
+      li.textContent = 'No crew members yet';
+      crewList.appendChild(li);
+    }else{
+      state.roster.crew.forEach(member =>{
+        const li = document.createElement('li');
+        li.innerHTML = `<span>${escapeHtml(member.name)}</span><button type="button" class="roster-remove" data-remove-crew="${member.id}" aria-label="Remove ${escapeHtml(member.name)}">×</button>`;
+        crewList.appendChild(li);
+      });
+    }
+  }
+}
+
+async function onAddPilot(){
+  if(!newPilotNameInput){
+    return;
+  }
+  const name = newPilotNameInput.value.trim();
+  if(!name){
+    toast('Enter a pilot name', true);
+    return;
+  }
+  if(addPilotBtn){ addPilotBtn.disabled = true; }
+  try{
+    await apiRequest('/api/pilots', {method:'POST', body: JSON.stringify({name})});
+    newPilotNameInput.value = '';
+    const refreshed = await loadRoster();
+    if(!refreshed){
+      toast('Pilot added, but roster refresh failed', true);
+    }else{
+      toast('Pilot added');
+    }
+  }catch(err){
+    console.error('Failed to add pilot', err);
+    toast(err.message || 'Failed to add pilot', true);
+  }finally{
+    if(addPilotBtn){ addPilotBtn.disabled = false; }
+  }
+}
+
+async function onRemovePilot(id){
+  if(!id){
+    return;
+  }
+  try{
+    await apiRequest(`/api/pilots/${id}`, {method:'DELETE'});
+    const refreshed = await loadRoster();
+    if(!refreshed){
+      toast('Pilot removed, but roster refresh failed', true);
+    }else{
+      toast('Pilot removed');
+    }
+  }catch(err){
+    console.error('Failed to remove pilot', err);
+    toast(err.message || 'Failed to remove pilot', true);
+  }
+}
+
+async function onAddCrewMember(){
+  if(!newCrewNameInput){
+    return;
+  }
+  const name = newCrewNameInput.value.trim();
+  if(!name){
+    toast('Enter a crew member name', true);
+    return;
+  }
+  if(addCrewBtn){ addCrewBtn.disabled = true; }
+  try{
+    await apiRequest('/api/crew', {method:'POST', body: JSON.stringify({name})});
+    newCrewNameInput.value = '';
+    const refreshed = await loadRoster();
+    if(!refreshed){
+      toast('Crew member added, but roster refresh failed', true);
+    }else{
+      toast('Crew member added');
+    }
+  }catch(err){
+    console.error('Failed to add crew member', err);
+    toast(err.message || 'Failed to add crew member', true);
+  }finally{
+    if(addCrewBtn){ addCrewBtn.disabled = false; }
+  }
+}
+
+async function onRemoveCrewMember(id){
+  if(!id){
+    return;
+  }
+  try{
+    await apiRequest(`/api/crew/${id}`, {method:'DELETE'});
+    const refreshed = await loadRoster();
+    if(!refreshed){
+      toast('Crew member removed, but roster refresh failed', true);
+    }else{
+      toast('Crew member removed');
+    }
+  }catch(err){
+    console.error('Failed to remove crew member', err);
+    toast(err.message || 'Failed to remove crew member', true);
+  }
+}
+
+function setView(view){
+  state.currentView = view;
+  document.body.classList.remove('view-landing','view-lead','view-pilot');
+  document.body.classList.add(`view-${view}`);
+  if(viewBadge){
+    if(view === 'landing'){
+      viewBadge.hidden = true;
+      viewBadge.classList.remove('view-badge-pilot');
+    }else{
+      viewBadge.hidden = false;
+      viewBadge.textContent = view === 'pilot' ? 'Pilot workspace' : 'Lead workspace';
+      viewBadge.classList.toggle('view-badge-pilot', view === 'pilot');
+    }
+  }
+  if(roleHomeBtn){
+    roleHomeBtn.hidden = view === 'landing';
+  }
+  if(view === 'landing'){
+    toggleConfig(false);
+  }
+  if(view === 'pilot'){
+    syncPilotShowSelect();
+  }else{
+    updatePilotSummary();
+  }
+  adjustContainerBottomPadding();
 }
 
 function toggleConfig(open){
@@ -976,9 +1426,7 @@ async function onConfigSubmit(event){
     updateWebhookPreview();
     updateConnectionIndicator('loading');
     await loadShows();
-    fillHeader(getCurrentShow());
-    renderGroups();
-    renderOperatorOptions();
+    setCurrentShow(state.currentShowId || null);
     configMessage.textContent = 'Settings saved. Storage restarted.';
     toggleConfig(false);
     toast('Settings updated');
@@ -1074,6 +1522,26 @@ function buildSampleWebhookRow(){
     commandRx: 'Yes',
     notes: 'Nominal flight'
   };
+}
+
+function normalizeRosterItem(item){
+  if(!item){
+    return null;
+  }
+  if(typeof item === 'string'){
+    const nameStr = item.trim();
+    return nameStr ? {id: nameStr, name: nameStr} : null;
+  }
+  const name = typeof item.name === 'string' ? item.name.trim() : '';
+  if(!name){
+    return null;
+  }
+  const id = typeof item.id === 'string' && item.id ? item.id : name;
+  return {id, name};
+}
+
+function sortRosterItems(a, b){
+  return a.name.localeCompare(b.name, undefined, {sensitivity: 'base'});
 }
 
 function clearErrors(){
@@ -1343,44 +1811,6 @@ async function apiRequest(url, options){
     throw new Error(message);
   }
   return data;
-}
-
-function initCrewChipInput(container, initial, onChange){
-  container.innerHTML = '';
-  const input = document.createElement('input');
-  input.type = 'text';
-  input.placeholder = 'Type name and press Enter';
-  const names = [...initial];
-  const renderChip = name =>{
-    const chip = document.createElement('span');
-    chip.className = 'chip';
-    chip.innerHTML = `<span>${escapeHtml(name)}</span><button class="x" aria-label="Remove">×</button>`;
-    qs('.x', chip).addEventListener('click', e=>{
-      e.stopPropagation();
-      const idx = names.indexOf(name);
-      if(idx >=0){
-        names.splice(idx,1);
-        chip.remove();
-        onChange([...names]);
-      }
-    });
-    return chip;
-  };
-  names.forEach(name=> container.appendChild(renderChip(name)));
-  container.appendChild(input);
-  input.addEventListener('keydown', e=>{
-    if(e.key === 'Enter' || e.key === ','){
-      e.preventDefault();
-      const value = input.value.trim();
-      if(value && !names.includes(value)){
-        names.push(value);
-        container.insertBefore(renderChip(value), input);
-        onChange([...names]);
-      }
-      input.value = '';
-    }
-  });
-  container.addEventListener('click', ()=> input.focus());
 }
 
 function getShowById(id){

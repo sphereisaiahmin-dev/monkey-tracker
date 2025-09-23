@@ -60,6 +60,39 @@ async function bootstrap(){
     res.json(config);
   }));
 
+  app.get('/api/roster', asyncHandler(async (req, res)=>{
+    const provider = getProvider();
+    const [pilots, crew] = await Promise.all([
+      provider.listPilots(),
+      provider.listCrew()
+    ]);
+    res.json({pilots, crew});
+  }));
+
+  app.post('/api/pilots', asyncHandler(async (req, res)=>{
+    const provider = getProvider();
+    const pilot = await provider.createPilot(req.body || {});
+    res.status(201).json(pilot);
+  }));
+
+  app.delete('/api/pilots/:id', asyncHandler(async (req, res)=>{
+    const provider = getProvider();
+    await provider.deletePilot(req.params.id);
+    res.status(204).end();
+  }));
+
+  app.post('/api/crew', asyncHandler(async (req, res)=>{
+    const provider = getProvider();
+    const crew = await provider.createCrewMember(req.body || {});
+    res.status(201).json(crew);
+  }));
+
+  app.delete('/api/crew/:id', asyncHandler(async (req, res)=>{
+    const provider = getProvider();
+    await provider.deleteCrewMember(req.params.id);
+    res.status(204).end();
+  }));
+
   app.get('/api/shows', asyncHandler(async (req, res)=>{
     const provider = getProvider();
     const shows = await provider.listShows();
@@ -144,7 +177,12 @@ async function bootstrap(){
 
   app.use((err, req, res, next)=>{ // eslint-disable-line no-unused-vars
     console.error(err);
-    res.status(500).json({error: 'Internal server error', detail: err.message});
+    const status = Number.isInteger(err.statusCode) ? err.statusCode : 500;
+    if(status === 500){
+      res.status(500).json({error: 'Internal server error', detail: err.message});
+    }else{
+      res.status(status).json({error: err.message || 'Request failed'});
+    }
   });
 
   function handleListenError(err){
