@@ -19,6 +19,18 @@ const EXPORT_COLUMNS = [
   'severity','rootCause','actions','operator','batteryId','delaySec','commandRx','notes'
 ];
 
+function createEmptyShowDraft(){
+  return {
+    date: '',
+    time: '',
+    label: '',
+    crew: [],
+    leadPilot: '',
+    monkeyLead: '',
+    notes: ''
+  };
+}
+
 const state = {
   config: null,
   unitLabel: 'Drone',
@@ -29,6 +41,7 @@ const state = {
   serverHost: '10.241.211.120',
   serverPort: 3000,
   storageLabel: 'SQL.js storage v2',
+  newShowDraft: createEmptyShowDraft(),
   isCreatingShow: false,
   webhookConfig: {
     enabled: false,
@@ -155,18 +168,22 @@ function initUI(){
     updateIssueVisibility();
   });
 
-  showDate.addEventListener('change', ()=> updateShowField('date', showDate.value));
-  showTime.addEventListener('change', ()=> updateShowField('time', showTime.value));
-  showLabel.addEventListener('input', debounce(()=> updateShowField('label', showLabel.value.trim()), 400));
-  showNotes.addEventListener('input', debounce(()=> updateShowField('notes', showNotes.value.trim()), 400));
+  showDate.addEventListener('change', ()=> updateNewShowDraft('date', showDate.value));
+  showTime.addEventListener('change', ()=> updateNewShowDraft('time', showTime.value));
+  showLabel.addEventListener('input', ()=> updateNewShowDraft('label', showLabel.value));
+  showNotes.addEventListener('input', ()=> updateNewShowDraft('notes', showNotes.value));
   if(showCrewSelect){
     showCrewSelect.addEventListener('change', ()=>{
       const selected = Array.from(showCrewSelect.selectedOptions).map(opt=> opt.value).filter(Boolean);
-      updateShowField('crew', selected);
+      updateNewShowDraft('crew', selected);
     });
   }
-  leadPilotSelect.addEventListener('change', ()=> updateShowField('leadPilot', leadPilotSelect.value));
-  monkeyLeadSelect.addEventListener('change', ()=> updateShowField('monkeyLead', monkeyLeadSelect.value));
+  if(leadPilotSelect){
+    leadPilotSelect.addEventListener('change', ()=> updateNewShowDraft('leadPilot', leadPilotSelect.value));
+  }
+  if(monkeyLeadSelect){
+    monkeyLeadSelect.addEventListener('change', ()=> updateNewShowDraft('monkeyLead', monkeyLeadSelect.value));
+  }
 
   const addLineBtn = el('addLine');
   if(newShowBtn){ newShowBtn.addEventListener('click', onNewShow); }
@@ -243,6 +260,8 @@ function initUI(){
       closeAllShowMenus();
     }
   });
+
+  renderShowHeaderDraft();
 }
 
 async function loadConfig(){
@@ -301,8 +320,7 @@ async function loadStaff(){
   }
   populateStaffSettings();
   renderOperatorOptions();
-  renderCrewOptions(getCurrentShow()?.crew || []);
-  renderPilotAssignments(getCurrentShow());
+  renderShowHeaderDraft();
 }
 
 async function loadShows(){
@@ -488,8 +506,6 @@ function getCurrentShow(){
 function setCurrentShow(showId, options = {}){
   const {skipPilotSync = false, skipRender = false} = options;
   state.currentShowId = showId || null;
-  const show = getCurrentShow();
-  fillHeader(show);
   renderOperatorOptions();
   updateIssueVisibility();
   if(!skipRender){
@@ -567,24 +583,6 @@ function sortShows(){
     const bu = b.updatedAt || b.createdAt || 0;
     return bu - au;
   });
-}
-
-function fillHeader(show){
-  if(!show){
-    showDate.value = '';
-    showTime.value = '';
-    showLabel.value = '';
-    showNotes.value = '';
-    renderCrewOptions([]);
-    renderPilotAssignments(null);
-    return;
-  }
-  showDate.value = show.date || '';
-  showTime.value = show.time || '';
-  showLabel.value = show.label || '';
-  showNotes.value = show.notes || '';
-  renderCrewOptions(show.crew || []);
-  renderPilotAssignments(show);
 }
 
 function populateUnitOptions(){
@@ -674,6 +672,37 @@ function collectShowHeaderValues(){
   };
 }
 
+function getNewShowDraft(){
+  if(!state.newShowDraft){
+    state.newShowDraft = createEmptyShowDraft();
+  }
+  return state.newShowDraft;
+}
+
+function renderShowHeaderDraft(){
+  const draft = getNewShowDraft();
+  if(showDate){ showDate.value = draft.date || ''; }
+  if(showTime){ showTime.value = draft.time || ''; }
+  if(showLabel){ showLabel.value = draft.label || ''; }
+  if(showNotes){ showNotes.value = draft.notes || ''; }
+  renderCrewOptions(draft.crew || []);
+  renderPilotAssignments(draft);
+}
+
+function resetShowHeaderDraft(){
+  state.newShowDraft = createEmptyShowDraft();
+  renderShowHeaderDraft();
+}
+
+function updateNewShowDraft(field, value){
+  const draft = getNewShowDraft();
+  if(field === 'crew'){
+    draft.crew = normalizeNameList(Array.isArray(value) ? value : [value]);
+    return;
+  }
+  draft[field] = value;
+}
+
 function setShowHeaderDisabled(disabled){
   const controls = [showDate, showTime, showLabel, showNotes, showCrewSelect, leadPilotSelect, monkeyLeadSelect];
   controls.forEach(control =>{
@@ -693,9 +722,7 @@ function setShowHeaderDisabled(disabled){
     }
   });
   if(!disabled){
-    const show = getCurrentShow();
-    renderCrewOptions(show?.crew || []);
-    renderPilotAssignments(show);
+    renderShowHeaderDraft();
   }
 }
 
@@ -716,18 +743,18 @@ async function onNewShow(){
     return;
   }
   const previousId = state.currentShowId;
-  const currentShow = getCurrentShow();
-  const initialValues = currentShow ? {} : collectShowHeaderValues();
+  const headerValues = collectShowHeaderValues();
   state.isCreatingShow = true;
   setShowHeaderDisabled(true);
   setNewShowButtonBusy(true);
   try{
-    const payload = await apiRequest('/api/shows', {method:'POST', body: JSON.stringify(initialValues)});
+    const payload = await apiRequest('/api/shows', {method:'POST', body: JSON.stringify(headerValues)});
     upsertShow(payload);
     setCurrentShow(payload.id);
     notifyShowsChanged({showId: payload.id});
     clearEntryForm();
     toast('New show created');
+    resetShowHeaderDraft();
   }catch(err){
     console.error(err);
     toast('Failed to create show', true);
@@ -786,26 +813,6 @@ async function duplicateShow(showId){
   }
 }
 
-async function updateShowField(field, value){
-  if(state.isCreatingShow){
-    return;
-  }
-  const show = getCurrentShow();
-  if(!show){
-    return;
-  }
-  try{
-    const updated = await apiRequest(`/api/shows/${show.id}`, {method:'PUT', body: JSON.stringify({[field]: value})});
-    upsertShow(updated);
-    setCurrentShow(updated.id);
-    notifyShowsChanged({showId: updated.id});
-  }catch(err){
-    console.error(err);
-    toast(err.message || 'Failed to update show', true);
-    setCurrentShow(show.id);
-  }
-}
-
 async function onAddLine(){
   if(state.currentView !== 'pilot'){
     toast('Switch to the Pilot workspace to log entries', true);
@@ -818,8 +825,8 @@ async function onAddLine(){
   }
   clearErrors();
   let ok = true;
-  if(!showDate.value){ showError('errDate'); ok=false; }
-  if(!showTime.value){ showError('errTime'); ok=false; }
+  if(!show.date){ showError('errDate'); ok=false; }
+  if(!show.time){ showError('errTime'); ok=false; }
   if(!unitId.value){ showError('errUnit'); ok=false; }
   if(!planned.value){ showError('errPlanned'); ok=false; }
   if(!launched.value){ showError('errLaunched'); ok=false; }
@@ -1784,14 +1791,6 @@ function formatTime12Hour(timeStr){
 
 function escapeHtml(str){
   return String(str || '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
-}
-
-function debounce(fn, wait){
-  let timeout;
-  return function(...args){
-    clearTimeout(timeout);
-    timeout = setTimeout(()=> fn.apply(this, args), wait);
-  };
 }
 
 async function apiRequest(url, options){
