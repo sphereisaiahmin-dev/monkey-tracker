@@ -4,7 +4,8 @@
   "description": "monkey tracker webgui",
   "main": "server/index.js",
   "scripts": {
-    "test": "echo \"No automated tests configured\""
+    "test": "echo \"No automated tests configured\"",
+    "simulate:webhook": "node scripts/simulate-webhook.js"
   },
   "keywords": [],
   "author": "",

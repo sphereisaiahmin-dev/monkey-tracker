@@ -1,15 +1,14 @@
 # Drone Tracker Web Application
 
-This project exposes the **Drone Tracker** interface as a full web application built with Express.js and a modular data layer. The UI is re-engineered from the original `Drone_Tracker_v0.8.5.html` file and now persists show data using either a local SQL database (SQLite) or a remote Coda table.
+This project exposes the **Drone Tracker** interface as a full web application built with Express.js and a modular data layer. The UI is re-engineered from the original `Drone_Tracker_v0.8.5.html` file and now persists show data using a local SQL.js (WebAssembly) database while optionally forwarding each entry to a configurable webhook.
 
 ## Features
 
 - Full-featured front-end built with HTML and CSS that retains the original look-and-feel and now surfaces a LAN connection dashboard for quick status checks.
 - Express.js backend API that manages shows, entries, and configuration.
-- Modular storage providers:
-  - **SQL (SQLite)** – default provider implemented with `sql.js` (WebAssembly) so no native builds are required. The server creates the database file if it does not exist.
-  - **Coda** – push and pull show payloads to a Coda table using the Coda REST API.
-- Configurable application settings from the in-app settings panel (unit label, provider selection, connection parameters).
+- SQL.js storage provider (v2) implemented with `sql.js` so no native builds are required. The server creates the database file if it does not exist.
+- Configurable application settings from the in-app settings panel (unit label, SQL.js database file, webhook delivery settings).
+- Optional per-entry webhook export that mirrors the CSV column structure so downstream tables align perfectly with local exports.
 - CSV and JSON export for the active show.
 - Entry editor modal with validation consistent with the original workflow.
 
@@ -31,7 +30,7 @@ This project exposes the **Drone Tracker** interface as a full web application b
 
    The app runs on [http://10.241.211.120:3000](http://10.241.211.120:3000) out of the box. Set the `HOST` and `PORT` environment variables before launching if you need a different binding (for example `HOST=0.0.0.0 node server/index.js`).
 
-3. Open the settings panel (gear icon) to choose the storage provider and supply the required connection parameters. By default the app uses SQLite and stores data in `data/monkey-tracker.sqlite`.
+3. Open the settings panel (gear icon) to adjust the SQL.js file location or to enable the webhook exporter. By default the app uses SQLite-on-WASM and stores data in `data/monkey-tracker.sqlite`.
 
 ## Configuration
 
@@ -44,28 +43,26 @@ The runtime configuration is stored in `config/app-config.json` (created automat
 
 > Update these values in `config/app-config.json` (or via environment variables) and restart `node server/index.js` for changes to take effect.
 
-### SQL Provider
+### SQL.js storage
 
 - **filename** – path to the SQLite database file. The directory is created if it does not exist. Shows are stored as JSON documents inside the `shows` table.
 
-### Coda Provider
+### Webhook exporter
 
-Provide the following values in the settings panel:
+Enable this option from the settings dialog to stream each saved entry to an external system. The payload mirrors the CSV export columns so the receiving table matches local downloads exactly.
 
-- **API token** – personal API token from Coda.
-- **Doc ID** – the identifier of the Coda doc (e.g. `doc_XXXX`).
-- **Table ID** – the target table ID (e.g. `table_YYYY`).
-- **Show ID column name** – text column that stores the unique show ID.
-- **Payload column name** – text column that stores the JSON payload returned by the app.
-
-> **Note:** The Coda provider requires a table with text columns capable of storing the show ID and JSON payload. The provider fetches and replaces complete show documents, including their entries.
+- **Enabled** – toggle to activate per-entry delivery.
+- **Webhook URL** – target endpoint that will receive JSON payloads.
+- **HTTP method** – verb used when sending the webhook (POST or PUT).
+- **Shared secret** – optional secret inserted into the `X-Drone-Webhook-Secret` header.
+- **Additional headers** – newline-delimited list of `Header: value` pairs that will be attached to every request.
 
 ## API Overview
 
 The Express backend exposes the following endpoints (all JSON):
 
-- `GET /api/config` / `PUT /api/config` – read or update application configuration.
-- `GET /api/shows` – list shows for the active provider.
+- `GET /api/config` / `PUT /api/config` – read or update application configuration (SQL.js settings + webhook configuration).
+- `GET /api/shows` – list shows along with the active storage label and webhook status.
 - `POST /api/shows` – create a new show.
 - `GET /api/shows/:id` – retrieve a single show.
 - `PUT /api/shows/:id` – update show metadata.

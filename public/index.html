@@ -13,7 +13,6 @@
         <button id="configBtn" class="btn icon-btn" aria-haspopup="dialog" aria-expanded="false" aria-controls="configPanel" title="Open settings">⚙️</button>
         <h1><span id="appTitle">Drone</span> Tracker</h1>
       </div>
-      <div class="subtitle">Per show run data entry. Backed by Express API with modular storage.</div>
     </div>
   </div>
 
@@ -31,32 +30,31 @@
         </select>
         <p class="help">Controls how units are referenced across the UI.</p>
       </div>
-      <div class="col-12">
-        <label for="providerSelect">Storage provider</label>
-        <select id="providerSelect" name="provider">
-          <option value="sql">SQL (SQLite)</option>
-          <option value="coda">Coda Table</option>
-        </select>
-      </div>
       <fieldset id="sqlFields" class="col-12 provider-fields">
         <legend>SQL configuration</legend>
         <label for="sqlFilename">SQLite database file</label>
         <input id="sqlFilename" type="text" placeholder="data/monkey-tracker.sqlite" />
         <p class="help">The server will create the file if it does not exist.</p>
       </fieldset>
-      <fieldset id="codaFields" class="col-12 provider-fields">
-        <legend>Coda configuration</legend>
-        <label for="codaToken">API token</label>
-        <input id="codaToken" type="password" autocomplete="off" placeholder="Coda API token" />
-        <label for="codaDoc">Doc ID</label>
-        <input id="codaDoc" type="text" autocomplete="off" placeholder="doc_XXXX" />
-        <label for="codaTable">Table ID</label>
-        <input id="codaTable" type="text" autocomplete="off" placeholder="table_XXXX" />
-        <label for="codaShowId">Show ID column name</label>
-        <input id="codaShowId" type="text" autocomplete="off" placeholder="Show ID" />
-        <label for="codaPayload">Payload column name</label>
-        <input id="codaPayload" type="text" autocomplete="off" placeholder="Payload" />
-        <p class="help">The payload column should be a text field used to store JSON.</p>
+      <fieldset id="webhookFields" class="col-12 provider-fields">
+        <legend>Webhook export</legend>
+        <label class="switch">
+          <input id="webhookEnabled" type="checkbox" />
+          <span>Enable per-entry webhook dispatch</span>
+        </label>
+        <p class="help">Send each recorded entry to an external endpoint using the same columns as the CSV export.</p>
+        <label for="webhookUrl">Webhook URL</label>
+        <input id="webhookUrl" type="url" autocomplete="off" placeholder="https://example.com/webhook" />
+        <label for="webhookMethod">HTTP method</label>
+        <select id="webhookMethod">
+          <option>POST</option>
+          <option>PUT</option>
+        </select>
+        <label for="webhookSecret">Shared secret (optional)</label>
+        <input id="webhookSecret" type="text" autocomplete="off" placeholder="Used for X-Drone-Webhook-Secret header" />
+        <label for="webhookHeaders">Additional headers (optional)</label>
+        <textarea id="webhookHeaders" placeholder="One per line, e.g., Authorization: Bearer token"></textarea>
+        <div id="webhookPreview" class="webhook-preview" aria-live="polite"></div>
       </fieldset>
       <div class="col-12 row" style="justify-content: flex-end; gap: 10px;">
         <button type="button" id="cancelConfig" class="btn ghost">Cancel</button>
@@ -77,13 +75,14 @@
           <ul class="quick-hints" role="list">
             <li><strong>New Show</strong> creates a fresh record with default crew and units.</li>
             <li><strong>Duplicate Current Show</strong> reuses the crew roster for the next run.</li>
-            <li>Switch between SQL and Coda storage at any time from the ⚙️ settings menu.</li>
+            <li>Adjust SQL.js storage settings and optional webhook delivery from the ⚙️ settings menu.</li>
           </ul>
         </div>
         <div class="lan-status" aria-live="polite">
           <div id="connectionStatus" class="connection-status is-pending">Checking server…</div>
           <div class="lan-controls">
-            <span id="providerBadge" class="badge provider-sql" aria-label="Active storage provider">SQL storage</span>
+            <span id="providerBadge" class="badge provider-sql" aria-label="Active storage provider">SQL.js storage v2</span>
+            <span id="webhookBadge" class="badge badge-webhook-off" aria-label="Webhook status">Webhook disabled</span>
             <button id="refreshShows" type="button" class="btn ghost">Refresh data</button>
           </div>
           <div class="lan-target">LAN URL: <code id="lanAddress">http://10.241.211.120:3000</code></div>

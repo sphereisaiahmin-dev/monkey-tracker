@@ -2,7 +2,8 @@ const path = require('path');
 const express = require('express');
 const morgan = require('morgan');
 const { loadConfig, saveConfig } = require('./configStore');
-const { initProvider, getProvider, getProviderName } = require('./storage');
+const { initProvider, getProvider } = require('./storage');
+const { setWebhookConfig, getWebhookStatus, dispatchEntryEvent } = require('./webhookDispatcher');
 
 async function bootstrap(){
   const app = express();
@@ -15,6 +16,7 @@ async function bootstrap(){
   let boundHost = envHost || configuredHost;
   let serverInstance = null;
   await initProvider(config);
+  setWebhookConfig(config.webhook);
 
   app.use(express.json({limit: '2mb'}));
   app.use(morgan('dev'));
@@ -29,7 +31,8 @@ async function bootstrap(){
   app.get('/api/health', (req, res)=>{
     res.json({
       status: 'ok',
-      provider: getProviderName(),
+      storage: 'sql.js v2',
+      webhook: getWebhookStatus(),
       host: configuredHost,
       port: configuredPort,
       boundHost,
@@ -44,6 +47,7 @@ async function bootstrap(){
   app.put('/api/config', asyncHandler(async (req, res)=>{
     const nextConfig = saveConfig(req.body || {});
     await initProvider(nextConfig);
+    setWebhookConfig(nextConfig.webhook);
     config = nextConfig;
     configuredHost = config.host || configuredHost;
     configuredPort = config.port || configuredPort;
@@ -59,7 +63,7 @@ async function bootstrap(){
   app.get('/api/shows', asyncHandler(async (req, res)=>{
     const provider = getProvider();
     const shows = await provider.listShows();
-    res.json({provider: getProviderName(), shows});
+    res.json({storage: 'sql.js v2', webhook: getWebhookStatus(), shows});
   }));
 
   app.post('/api/shows', asyncHandler(async (req, res)=>{
@@ -106,6 +110,8 @@ async function bootstrap(){
       res.status(404).json({error: 'Show not found'});
       return;
     }
+    const show = await provider.getShow(req.params.id);
+    await dispatchEntryEvent('entry.created', show, entry);
     res.status(201).json(entry);
   }));
 
@@ -116,6 +122,8 @@ async function bootstrap(){
       res.status(404).json({error: 'Entry not found'});
       return;
     }
+    const show = await provider.getShow(req.params.id);
+    await dispatchEntryEvent('entry.updated', show, entry);
     res.json(entry);
   }));
 
@@ -136,10 +144,6 @@ async function bootstrap(){
 
   app.use((err, req, res, next)=>{ // eslint-disable-line no-unused-vars
     console.error(err);
-    if(err.message && err.message.includes('Coda provider is not fully configured')){
-      res.status(400).json({error: err.message});
-      return;
-    }
     res.status(500).json({error: 'Internal server error', detail: err.message});
   });
 

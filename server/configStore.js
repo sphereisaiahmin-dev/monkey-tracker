@@ -8,16 +8,15 @@ const DEFAULT_CONFIG = {
   host: DEFAULT_HOST,
   port: DEFAULT_PORT,
   unitLabel: 'Drone',
-  provider: 'sql',
   sql: {
     filename: path.join(process.cwd(), 'data', 'monkey-tracker.sqlite')
   },
-  coda: {
-    apiToken: '',
-    docId: '',
-    tableId: '',
-    showIdColumn: 'Show ID',
-    payloadColumn: 'Payload'
+  webhook: {
+    enabled: false,
+    url: '',
+    method: 'POST',
+    secret: '',
+    headers: []
   }
 };
 
@@ -36,13 +35,14 @@ function loadConfig(){
   try{
     const raw = fs.readFileSync(CONFIG_FILE, 'utf8');
     const parsed = JSON.parse(raw);
+    const {provider: _legacyProvider, ...cleanParsed} = parsed;
     return {
       ...DEFAULT_CONFIG,
-      ...parsed,
-      sql: {...DEFAULT_CONFIG.sql, ...(parsed.sql || {})},
-      coda: {...DEFAULT_CONFIG.coda, ...(parsed.coda || {})},
-      host: parsed.host || DEFAULT_CONFIG.host,
-      port: Number.isFinite(parseInt(parsed.port, 10)) ? parseInt(parsed.port, 10) : DEFAULT_CONFIG.port
+      ...cleanParsed,
+      sql: {...DEFAULT_CONFIG.sql, ...(cleanParsed.sql || {})},
+      webhook: {...DEFAULT_CONFIG.webhook, ...(cleanParsed.webhook || {})},
+      host: cleanParsed.host || DEFAULT_CONFIG.host,
+      port: Number.isFinite(parseInt(cleanParsed.port, 10)) ? parseInt(cleanParsed.port, 10) : DEFAULT_CONFIG.port
     };
   }catch(err){
     console.error('Failed to load config. Falling back to defaults.', err);
@@ -56,8 +56,9 @@ function saveConfig(config){
     ...DEFAULT_CONFIG,
     ...config,
     sql: {...DEFAULT_CONFIG.sql, ...(config.sql || {})},
-    coda: {...DEFAULT_CONFIG.coda, ...(config.coda || {})}
+    webhook: {...DEFAULT_CONFIG.webhook, ...(config.webhook || {})}
   };
+  delete merged.provider;
   merged.host = merged.host || DEFAULT_CONFIG.host;
   merged.port = Number.isFinite(parseInt(merged.port, 10)) ? parseInt(merged.port, 10) : DEFAULT_CONFIG.port;
   fs.writeFileSync(CONFIG_FILE, JSON.stringify(merged, null, 2));

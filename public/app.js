@@ -14,6 +14,11 @@ const PRIMARY_ISSUES = Object.keys(ISSUE_MAP);
 const ACTIONS = ['Reboot','Swap battery','Swap drone','Retry launch','Abort segment','Logged only'];
 const DEFAULT_CREW = ['Alex','Nick','John Henery','James','Robert','Nazar'];
 const STATUS = ['Completed','No-launch','Abort'];
+const EXPORT_COLUMNS = [
+  'showId','showDate','showTime','showLabel','crew','leadPilot','monkeyLead','showNotes',
+  'entryId','unitId','planned','launched','status','primaryIssue','subIssue','otherDetail',
+  'severity','rootCause','actions','operator','batteryId','delaySec','commandRx','notes'
+];
 
 const state = {
   config: null,
@@ -23,7 +28,20 @@ const state = {
   editingEntryRef: null,
   serverHost: '10.241.211.120',
   serverPort: 3000,
-  activeProvider: null
+  storageLabel: 'SQL.js storage v2',
+  webhookConfig: {
+    enabled: false,
+    url: '',
+    method: 'POST',
+    secret: '',
+    headersText: ''
+  },
+  webhookStatus: {
+    enabled: false,
+    method: 'POST',
+    hasSecret: false,
+    headerCount: 0
+  }
 };
 
 const appTitle = el('appTitle');
@@ -64,18 +82,17 @@ const closeConfigBtn = el('closeConfig');
 const cancelConfigBtn = el('cancelConfig');
 const configForm = el('configForm');
 const configMessage = el('configMessage');
-const providerSelect = el('providerSelect');
 const unitLabelSelect = el('unitLabelSelect');
-const sqlFields = el('sqlFields');
-const codaFields = el('codaFields');
 const sqlFilename = el('sqlFilename');
-const codaToken = el('codaToken');
-const codaDoc = el('codaDoc');
-const codaTable = el('codaTable');
-const codaShowId = el('codaShowId');
-const codaPayload = el('codaPayload');
+const webhookEnabled = el('webhookEnabled');
+const webhookUrl = el('webhookUrl');
+const webhookMethod = el('webhookMethod');
+const webhookSecret = el('webhookSecret');
+const webhookHeaders = el('webhookHeaders');
+const webhookPreview = el('webhookPreview');
 const connectionStatusEl = el('connectionStatus');
 const providerBadge = el('providerBadge');
+const webhookBadge = el('webhookBadge');
 const refreshShowsBtn = el('refreshShows');
 const lanAddressEl = el('lanAddress');
 
@@ -140,7 +157,32 @@ function initUI(){
   });
 
   configForm.addEventListener('submit', onConfigSubmit);
-  providerSelect.addEventListener('change', onProviderChange);
+  if(webhookEnabled){
+    webhookEnabled.addEventListener('change', ()=>{
+      syncWebhookFields();
+      updateWebhookPreview();
+    });
+  }
+  if(webhookUrl){
+    webhookUrl.addEventListener('input', ()=>{
+      updateWebhookPreview();
+    });
+  }
+  if(webhookMethod){
+    webhookMethod.addEventListener('change', ()=>{
+      updateWebhookPreview();
+    });
+  }
+  if(webhookSecret){
+    webhookSecret.addEventListener('input', ()=>{
+      updateWebhookPreview();
+    });
+  }
+  if(webhookHeaders){
+    webhookHeaders.addEventListener('input', ()=>{
+      updateWebhookPreview();
+    });
+  }
   if(refreshShowsBtn){
     refreshShowsBtn.dataset.label = refreshShowsBtn.textContent;
     refreshShowsBtn.addEventListener('click', onRefreshShows);
@@ -163,30 +205,51 @@ async function loadConfig(){
   const portFromConfig = Number.parseInt(data.port, 10);
   state.serverPort = Number.isFinite(portFromConfig) ? portFromConfig : state.serverPort;
   state.unitLabel = data.unitLabel || 'Drone';
-  state.activeProvider = data.provider || state.activeProvider || 'sql';
+  state.storageLabel = 'SQL.js storage v2';
+  state.webhookConfig = {
+    enabled: Boolean(data.webhook?.enabled),
+    url: data.webhook?.url || '',
+    method: (data.webhook?.method || 'POST').toUpperCase(),
+    secret: data.webhook?.secret || '',
+    headersText: formatHeadersText(data.webhook?.headers)
+  };
+  state.webhookStatus = {
+    enabled: Boolean(data.webhook?.enabled && data.webhook?.url),
+    method: (data.webhook?.method || 'POST').toUpperCase(),
+    hasSecret: Boolean(data.webhook?.secret),
+    headerCount: Array.isArray(data.webhook?.headers) ? data.webhook.headers.length : 0
+  };
   appTitle.textContent = state.unitLabel;
   unitLabelEl.textContent = state.unitLabel;
-  providerSelect.value = data.provider || 'sql';
   unitLabelSelect.value = state.unitLabel;
   sqlFilename.value = data.sql?.filename || '';
-  codaToken.value = data.coda?.apiToken || '';
-  codaDoc.value = data.coda?.docId || '';
-  codaTable.value = data.coda?.tableId || '';
-  codaShowId.value = data.coda?.showIdColumn || '';
-  codaPayload.value = data.coda?.payloadColumn || '';
+  if(webhookEnabled){ webhookEnabled.checked = state.webhookConfig.enabled; }
+  if(webhookUrl){ webhookUrl.value = state.webhookConfig.url; }
+  if(webhookMethod){ webhookMethod.value = state.webhookConfig.method; }
+  if(webhookSecret){ webhookSecret.value = state.webhookConfig.secret; }
+  if(webhookHeaders){ webhookHeaders.value = state.webhookConfig.headersText; }
   setLanAddress();
-  setProviderBadge(state.activeProvider);
-  onProviderChange();
+  setProviderBadge(state.storageLabel);
+  setWebhookBadge(state.webhookStatus);
+  syncWebhookFields();
+  updateWebhookPreview();
 }
 
 async function loadShows(){
   try{
     const data = await apiRequest('/api/shows');
-    state.activeProvider = data.provider || state.config?.provider || state.activeProvider || 'sql';
+    state.storageLabel = 'SQL.js storage v2';
+    state.webhookStatus = {
+      enabled: Boolean(data.webhook?.enabled),
+      method: (data.webhook?.method || state.webhookStatus.method || 'POST').toUpperCase(),
+      hasSecret: Boolean(data.webhook?.hasSecret),
+      headerCount: Number.isFinite(data.webhook?.headerCount) ? data.webhook.headerCount : state.webhookStatus.headerCount || 0
+    };
     state.shows = Array.isArray(data.shows) ? data.shows : [];
     sortShows();
     state.currentShowId = state.shows[0]?.id || null;
     updateConnectionIndicator();
+    updateWebhookPreview();
   }catch(err){
     console.error('Failed to load shows', err);
     state.shows = [];
@@ -546,6 +609,7 @@ function renderGroups(){
     group.appendChild(rows);
     groupsContainer.appendChild(group);
   });
+  updateWebhookPreview();
 }
 
 function groupTitle(show){
@@ -869,16 +933,15 @@ async function onConfigSubmit(event){
   event.preventDefault();
   const payload = {
     unitLabel: unitLabelSelect.value,
-    provider: providerSelect.value,
     sql: {
       filename: sqlFilename.value.trim()
     },
-    coda: {
-      apiToken: codaToken.value.trim(),
-      docId: codaDoc.value.trim(),
-      tableId: codaTable.value.trim(),
-      showIdColumn: codaShowId.value.trim(),
-      payloadColumn: codaPayload.value.trim()
+    webhook: {
+      enabled: webhookEnabled ? webhookEnabled.checked : false,
+      url: webhookUrl ? webhookUrl.value.trim() : '',
+      method: webhookMethod ? webhookMethod.value.toUpperCase() : 'POST',
+      secret: webhookSecret ? webhookSecret.value.trim() : '',
+      headers: parseHeadersText(webhookHeaders ? webhookHeaders.value : '')
     }
   };
   try{
@@ -888,19 +951,35 @@ async function onConfigSubmit(event){
     state.serverHost = updated.host || state.serverHost;
     const nextPort = Number.parseInt(updated.port, 10);
     state.serverPort = Number.isFinite(nextPort) ? nextPort : state.serverPort;
-    state.activeProvider = updated.provider || state.activeProvider || 'sql';
+    state.storageLabel = 'SQL.js storage v2';
+    state.webhookConfig = {
+      enabled: Boolean(updated.webhook?.enabled),
+      url: updated.webhook?.url || '',
+      method: (updated.webhook?.method || 'POST').toUpperCase(),
+      secret: updated.webhook?.secret || '',
+      headersText: formatHeadersText(updated.webhook?.headers)
+    };
+    state.webhookStatus = {
+      enabled: Boolean(updated.webhook?.enabled && updated.webhook?.url),
+      method: state.webhookConfig.method,
+      hasSecret: Boolean(updated.webhook?.secret),
+      headerCount: Array.isArray(updated.webhook?.headers) ? updated.webhook.headers.length : 0
+    };
     unitLabelSelect.value = state.unitLabel;
     appTitle.textContent = state.unitLabel;
     unitLabelEl.textContent = state.unitLabel;
     setLanAddress();
-    setProviderBadge(state.activeProvider);
+    setProviderBadge(state.storageLabel);
+    setWebhookBadge(state.webhookStatus);
     populateUnitOptions();
+    syncWebhookFields();
+    updateWebhookPreview();
     updateConnectionIndicator('loading');
     await loadShows();
     fillHeader(getCurrentShow());
     renderGroups();
     renderOperatorOptions();
-    configMessage.textContent = 'Settings saved. Provider restarted.';
+    configMessage.textContent = 'Settings saved. Storage restarted.';
     toggleConfig(false);
     toast('Settings updated');
   }catch(err){
@@ -910,48 +989,17 @@ async function onConfigSubmit(event){
   }
 }
 
-function onProviderChange(){
-  const provider = providerSelect.value;
-  sqlFields.style.display = provider === 'sql' ? 'block' : 'none';
-  codaFields.style.display = provider === 'coda' ? 'block' : 'none';
-}
-
 function onExportCsv(){
   const show = getCurrentShow();
   if(!show){
     toast('No current show', true);
     return;
   }
-  const headers = [
-    'showId','showDate','showTime','showLabel','crew','leadPilot','monkeyLead','showNotes','entryId','unitId','planned','launched','status','primaryIssue','subIssue','otherDetail','severity','rootCause','actions','operator','batteryId','delaySec','commandRx','notes'
-  ];
-  const rows = (show.entries||[]).map(entry=>[
-    show.id,
-    show.date || '',
-    show.time || '',
-    show.label || '',
-    (show.crew||[]).join('|'),
-    show.leadPilot || '',
-    show.monkeyLead || '',
-    show.notes || '',
-    entry.id,
-    entry.unitId || '',
-    entry.planned || '',
-    entry.launched || '',
-    entry.status || '',
-    entry.primaryIssue || '',
-    entry.subIssue || '',
-    entry.otherDetail || '',
-    entry.severity || '',
-    entry.rootCause || '',
-    (entry.actions||[]).join('|'),
-    entry.operator || '',
-    entry.batteryId || '',
-    entry.delaySec ?? '',
-    entry.commandRx || '',
-    entry.notes || ''
-  ]);
-  const csv = [headers.map(csvEscape).join(','), ...rows.map(row=>row.map(csvEscape).join(','))].join('\n');
+  const rows = (show.entries||[]).map(entry=>{
+    const row = buildWebhookRow(show, entry);
+    return EXPORT_COLUMNS.map(column => row[column] ?? '');
+  });
+  const csv = [EXPORT_COLUMNS.map(csvEscape).join(','), ...rows.map(row=>row.map(csvEscape).join(','))].join('\n');
   downloadFile(csv, `${show.id}.csv`, 'text/csv');
   toast('CSV exported');
 }
@@ -965,6 +1013,67 @@ function onExportJson(){
   const json = JSON.stringify(show, null, 2);
   downloadFile(json, `${show.id}.json`, 'application/json');
   toast('JSON exported');
+}
+
+function buildWebhookRow(show = {}, entry = {}){
+  const status = entry.status || '';
+  const crewList = Array.isArray(show.crew) ? show.crew : [];
+  const actions = Array.isArray(entry.actions) ? entry.actions : [];
+  return {
+    showId: show.id || '',
+    showDate: show.date || '',
+    showTime: show.time || '',
+    showLabel: show.label || '',
+    crew: crewList.join('|'),
+    leadPilot: show.leadPilot || '',
+    monkeyLead: show.monkeyLead || '',
+    showNotes: show.notes || '',
+    entryId: entry.id || '',
+    unitId: entry.unitId || '',
+    planned: entry.planned || '',
+    launched: entry.launched || '',
+    status,
+    primaryIssue: status === 'Completed' ? '' : (entry.primaryIssue || ''),
+    subIssue: status === 'Completed' ? '' : (entry.subIssue || ''),
+    otherDetail: status === 'Completed' ? '' : (entry.otherDetail || ''),
+    severity: status === 'Completed' ? '' : (entry.severity || ''),
+    rootCause: status === 'Completed' ? '' : (entry.rootCause || ''),
+    actions: actions.join('|'),
+    operator: entry.operator || '',
+    batteryId: entry.batteryId || '',
+    delaySec: entry.delaySec === null || entry.delaySec === undefined ? '' : entry.delaySec,
+    commandRx: entry.commandRx || '',
+    notes: entry.notes || ''
+  };
+}
+
+function buildSampleWebhookRow(){
+  return {
+    showId: 'sample-show',
+    showDate: '2024-07-01',
+    showTime: '19:00',
+    showLabel: 'Evening Showcase',
+    crew: 'Alex|Nazar',
+    leadPilot: 'Alex',
+    monkeyLead: 'Nazar',
+    showNotes: 'Preview row for webhook payload',
+    entryId: 'sample-entry',
+    unitId: 'Drone-01',
+    planned: 'Yes',
+    launched: 'Yes',
+    status: 'Completed',
+    primaryIssue: '',
+    subIssue: '',
+    otherDetail: '',
+    severity: '',
+    rootCause: '',
+    actions: 'Logged only',
+    operator: 'Alex',
+    batteryId: 'B-12',
+    delaySec: '0',
+    commandRx: 'Yes',
+    notes: 'Nominal flight'
+  };
 }
 
 function clearErrors(){
@@ -985,28 +1094,37 @@ function setLanAddress(){
   lanAddressEl.textContent = `http://${host}:${port}`;
 }
 
-function setProviderBadge(provider){
+function setProviderBadge(label){
   if(!providerBadge){ return; }
-  const normalized = (provider || '').toLowerCase();
-  providerBadge.classList.remove('provider-sql', 'provider-coda');
-  if(normalized === 'coda'){
-    providerBadge.classList.add('provider-coda');
-    providerBadge.textContent = 'Coda table';
-  }else{
-    providerBadge.classList.add('provider-sql');
-    providerBadge.textContent = 'SQL storage';
-  }
-  providerBadge.setAttribute('aria-label', `Active storage provider: ${providerBadge.textContent}`);
+  providerBadge.classList.remove('provider-coda');
+  providerBadge.classList.add('provider-sql');
+  const text = label || 'SQL.js storage v2';
+  providerBadge.textContent = text;
+  providerBadge.setAttribute('aria-label', `Active storage provider: ${text}`);
+}
+
+function setWebhookBadge(status){
+  if(!webhookBadge){ return; }
+  const enabled = Boolean(status?.enabled);
+  webhookBadge.classList.toggle('badge-webhook-on', enabled);
+  webhookBadge.classList.toggle('badge-webhook-off', !enabled);
+  const method = (status?.method || 'POST').toUpperCase();
+  const text = enabled ? `Webhook ${method}` : 'Webhook disabled';
+  webhookBadge.textContent = text;
+  webhookBadge.setAttribute('aria-label', `Webhook status: ${text}`);
 }
 
 function updateConnectionIndicator(status){
   if(!connectionStatusEl){ return; }
   const host = state.serverHost || '10.241.211.120';
   const port = state.serverPort || 3000;
-  const provider = (state.activeProvider || state.config?.provider || 'sql').toLowerCase();
-  const providerLabel = provider === 'coda' ? 'Coda table' : 'SQL storage';
+  const storageLabel = state.storageLabel || 'SQL.js storage v2';
+  const webhookLabel = state.webhookStatus?.enabled
+    ? `Webhook ${state.webhookStatus.method || 'POST'}`
+    : 'Webhook disabled';
   setLanAddress();
-  setProviderBadge(provider);
+  setProviderBadge(storageLabel);
+  setWebhookBadge(state.webhookStatus);
   connectionStatusEl.classList.remove('is-error', 'is-pending');
   let message = '';
   if(status === 'loading'){
@@ -1021,7 +1139,107 @@ function updateConnectionIndicator(status){
   }else{
     message = `Connected to ${host}:${port}`;
   }
-  connectionStatusEl.textContent = `${message} • ${providerLabel}`;
+  connectionStatusEl.textContent = `${message} • ${storageLabel} • ${webhookLabel}`;
+}
+
+function formatHeadersText(headers){
+  if(!headers){
+    return '';
+  }
+  if(Array.isArray(headers)){
+    return headers
+      .map(header => {
+        if(typeof header === 'string'){ return header.trim(); }
+        if(header && (header.name || header.key)){
+          const name = String(header.name || header.key).trim();
+          const value = header.value !== undefined ? String(header.value) : '';
+          return name ? `${name}: ${value}`.trim() : '';
+        }
+        return '';
+      })
+      .filter(Boolean)
+      .join('\n');
+  }
+  if(typeof headers === 'object'){
+    return Object.entries(headers)
+      .map(([name, value])=>`${name}: ${value}`)
+      .join('\n');
+  }
+  return '';
+}
+
+function parseHeadersText(value){
+  if(!value){
+    return [];
+  }
+  return value.split(/\n+/)
+    .map(line => line.trim())
+    .filter(Boolean)
+    .map(line => {
+      const idx = line.indexOf(':');
+      if(idx === -1){
+        return null;
+      }
+      const name = line.slice(0, idx).trim();
+      const headerValue = line.slice(idx + 1).trim();
+      return name ? {name, value: headerValue} : null;
+    })
+    .filter(Boolean);
+}
+
+function syncWebhookFields(){
+  if(!webhookEnabled){ return; }
+  const enabled = webhookEnabled.checked;
+  [webhookUrl, webhookMethod, webhookSecret, webhookHeaders].forEach(input=>{
+    if(input){
+      input.disabled = !enabled;
+      if(!enabled){
+        input.classList.add('is-disabled');
+      }else{
+        input.classList.remove('is-disabled');
+      }
+    }
+  });
+  if(webhookPreview){
+    webhookPreview.classList.toggle('is-disabled', !enabled || !(webhookUrl?.value.trim()));
+  }
+}
+
+function updateWebhookPreview(){
+  if(!webhookPreview){
+    return;
+  }
+  state.webhookConfig.enabled = webhookEnabled ? webhookEnabled.checked : false;
+  state.webhookConfig.url = webhookUrl ? webhookUrl.value.trim() : '';
+  state.webhookConfig.method = webhookMethod ? webhookMethod.value.toUpperCase() : 'POST';
+  state.webhookConfig.secret = webhookSecret ? webhookSecret.value.trim() : '';
+  state.webhookConfig.headersText = webhookHeaders ? webhookHeaders.value : '';
+
+  const enabled = state.webhookConfig.enabled;
+  const url = state.webhookConfig.url;
+  const method = state.webhookConfig.method;
+  const show = getCurrentShow();
+  const entry = show?.entries?.[0];
+  let row = buildWebhookRow(show || {}, entry || {});
+  const emptyRow = EXPORT_COLUMNS.every(col => row[col] === '' || row[col] === null || row[col] === undefined);
+  if(emptyRow){
+    row = buildSampleWebhookRow();
+  }
+  const headerCells = EXPORT_COLUMNS.map(column=>`<th>${escapeHtml(column)}</th>`).join('');
+  const rowCells = EXPORT_COLUMNS.map(column=>`<td>${escapeHtml(row[column] ?? '')}</td>`).join('');
+  const statusMessage = !enabled
+    ? 'Webhook disabled. Enable the toggle to deliver entries automatically.'
+    : (url ? `Entries will ${escapeHtml(method)} to ${escapeHtml(url)}.` : 'Provide a webhook URL to activate delivery.');
+  webhookPreview.innerHTML = `
+    <div class="webhook-status ${enabled && url ? 'is-on' : 'is-off'}">${statusMessage}</div>
+    <div class="webhook-table-wrap">
+      <table class="webhook-table">
+        <thead><tr>${headerCells}</tr></thead>
+        <tbody><tr>${rowCells}</tr></tbody>
+      </table>
+    </div>
+  `;
+  webhookPreview.classList.toggle('is-disabled', !enabled || !url);
 }
 
 function toast(message, isError){
