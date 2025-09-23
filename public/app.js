@@ -775,14 +775,27 @@ function renderArchiveDetails(show){
     ['Lead pilot', show.leadPilot || '—'],
     ['Monkey lead', show.monkeyLead || '—'],
     ['Crew', crewList],
-    ['Entries logged', String(entries.length)]
+    ['Entries logged', entries.length]
   ];
+  const entryCountLabel = entries.length
+    ? `${entries.length} ${entries.length === 1 ? 'entry' : 'entries'} logged`
+    : 'No entries logged';
+  const entriesMarkup = entries.length
+    ? entries.map((entry, index)=> renderArchiveEntry(entry, index)).join('')
+    : '<p class="archive-empty-msg">No entries recorded for this show yet.</p>';
   archiveDetails.innerHTML = `
     <div class="archive-card">
       <dl class="archive-info">
-        ${rows.map(([label, value])=>`<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join('')}
+        ${rows.map(([label, value])=> renderArchiveMeta(label, value)).join('')}
       </dl>
       ${show.notes ? `<div class="archive-notes"><h3>Show notes</h3><p>${escapeHtml(show.notes)}</p></div>` : ''}
+    </div>
+    <div class="archive-entries">
+      <div class="archive-entries-header">
+        <h3>Entries</h3>
+        <span class="archive-entries-count">${escapeHtml(entryCountLabel)}</span>
+      </div>
+      ${entriesMarkup}
     </div>
   `;
   if(archiveMeta){
@@ -795,6 +808,63 @@ function renderArchiveDetails(show){
   }
   if(archiveExportCsvBtn){ archiveExportCsvBtn.disabled = false; }
   if(archiveExportJsonBtn){ archiveExportJsonBtn.disabled = false; }
+}
+
+function renderArchiveMeta(label, value){
+  const text = value === undefined || value === null || value === '' ? '—' : String(value);
+  return `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(text)}</dd></div>`;
+}
+
+function renderArchiveEntry(entry, index){
+  const statusKey = String(entry.status || '').toLowerCase();
+  let statusClass = 'status-completed';
+  if(statusKey === 'no-launch'){
+    statusClass = 'status-no-launch';
+  }else if(statusKey === 'abort'){
+    statusClass = 'status-abort';
+  }
+  const planned = entry.planned || '—';
+  const launched = entry.launched || '—';
+  const operatorName = entry.operator || '—';
+  const battery = entry.batteryId || '—';
+  const delayValue = (typeof entry.delaySec === 'number' && Number.isFinite(entry.delaySec))
+    ? `${entry.delaySec} s`
+    : '—';
+  const primaryIssue = statusClass === 'status-completed' ? '—' : (entry.primaryIssue || '—');
+  const issueDetail = statusClass === 'status-completed' ? '—' : (entry.subIssue || entry.otherDetail || '—');
+  const severity = statusClass === 'status-completed' ? '—' : (entry.severity || '—');
+  const rootCause = statusClass === 'status-completed' ? '—' : (entry.rootCause || '—');
+  const actionsList = Array.isArray(entry.actions) && entry.actions.length ? entry.actions.join(', ') : '—';
+  const commandRx = entry.commandRx || '—';
+  const timestamp = formatDateTime(entry.ts);
+  const unitLabel = entry.unitId || `Entry ${index + 1}`;
+  const notesSection = entry.notes ? `<div class="archive-entry-notes"><h4>Notes</h4><p>${escapeHtml(entry.notes)}</p></div>` : '';
+  const headerTimestamp = timestamp ? `<span class="archive-entry-timestamp">${escapeHtml(timestamp)}</span>` : '';
+  return `
+    <article class="archive-entry ${statusClass}">
+      <header class="archive-entry-header">
+        <div class="archive-entry-heading">
+          <span class="archive-entry-unit">${escapeHtml(unitLabel)}</span>
+          <span class="archive-entry-badge ${statusClass}">${escapeHtml(entry.status || '—')}</span>
+        </div>
+        ${headerTimestamp}
+      </header>
+      <dl class="archive-entry-grid">
+        ${renderArchiveMeta('Planned', planned)}
+        ${renderArchiveMeta('Launched', launched)}
+        ${renderArchiveMeta('Operator', operatorName)}
+        ${renderArchiveMeta('Battery', battery)}
+        ${renderArchiveMeta('Delay', delayValue)}
+        ${renderArchiveMeta('Primary issue', primaryIssue)}
+        ${renderArchiveMeta('Issue detail', issueDetail)}
+        ${renderArchiveMeta('Severity', severity)}
+        ${renderArchiveMeta('Root cause', rootCause)}
+        ${renderArchiveMeta('Actions', actionsList)}
+        ${renderArchiveMeta('Command RX', commandRx)}
+      </dl>
+      ${notesSection}
+    </article>
+  `;
 }
 
 function exportSelectedArchive(format){
@@ -1056,6 +1126,42 @@ async function duplicateShow(showId){
   }
 }
 
+async function archiveShowNow(showId){
+  closeAllShowMenus();
+  const show = state.shows.find(s => s.id === showId);
+  if(!show){
+    toast('Show not found', true);
+    return;
+  }
+  const confirmed = confirm('Archive this show now? It will move to the archive workspace.');
+  if(!confirmed){
+    return;
+  }
+  let archivedPayload = null;
+  try{
+    archivedPayload = await apiRequest(`/api/shows/${showId}/archive`, {method:'POST'});
+  }catch(err){
+    console.error('Failed to archive show', err);
+    toast(err.message || 'Failed to archive show', true);
+    return;
+  }
+  const wasCurrent = state.currentShowId === showId;
+  state.shows = state.shows.filter(s => s.id !== showId);
+  if(wasCurrent){
+    const fallbackId = state.shows[0]?.id || null;
+    setCurrentShow(fallbackId);
+  }else{
+    renderGroups();
+    syncPilotShowSelect();
+  }
+  await loadArchivedShows({silent: true, preserveSelection: true});
+  if(archivedPayload && archivedPayload.id){
+    setCurrentArchivedShow(archivedPayload.id);
+  }
+  notifyShowsChanged({showId: state.currentShowId || null});
+  toast('Show archived');
+}
+
 async function onAddLine(){
   if(state.currentView !== 'pilot'){
     toast('Switch to the Pilot workspace to log entries', true);
@@ -1257,6 +1363,16 @@ function createShowMenu(show){
     await duplicateShow(show.id);
   });
   menu.appendChild(duplicateBtn);
+  const archiveBtn = document.createElement('button');
+  archiveBtn.type = 'button';
+  archiveBtn.className = 'menu-item';
+  archiveBtn.textContent = 'Archive show';
+  archiveBtn.addEventListener('click', async event=>{
+    event.preventDefault();
+    event.stopPropagation();
+    await archiveShowNow(show.id);
+  });
+  menu.appendChild(archiveBtn);
   wrap.appendChild(btn);
   wrap.appendChild(menu);
   return wrap;
@@ -2153,6 +2269,10 @@ function escapeHtml(str){
 }
 
 function normalizeArchivedShow(raw = {}){
+  const crew = Array.isArray(raw.crew) ? normalizeNameList(raw.crew || [], {sort: false}) : [];
+  const entries = Array.isArray(raw.entries)
+    ? raw.entries.map(normalizeArchivedEntry).sort((a, b)=> (b.ts || 0) - (a.ts || 0))
+    : [];
   const show = {
     id: raw.id,
     date: typeof raw.date === 'string' ? raw.date : '',
@@ -2161,12 +2281,37 @@ function normalizeArchivedShow(raw = {}){
     leadPilot: typeof raw.leadPilot === 'string' ? raw.leadPilot : '',
     monkeyLead: typeof raw.monkeyLead === 'string' ? raw.monkeyLead : '',
     notes: typeof raw.notes === 'string' ? raw.notes : '',
-    crew: Array.isArray(raw.crew) ? raw.crew.map(name=> typeof name === 'string' ? name : '').filter(Boolean) : [],
-    entries: Array.isArray(raw.entries) ? raw.entries.map(entry => ({...entry})) : [],
+    crew,
+    entries,
     createdAt: toNumber(raw.createdAt),
     archivedAt: toNumber(raw.archivedAt)
   };
   return show;
+}
+
+function normalizeArchivedEntry(raw = {}){
+  const entry = {
+    id: typeof raw.id === 'string' ? raw.id : '',
+    ts: toNumber(raw.ts),
+    unitId: typeof raw.unitId === 'string' ? raw.unitId : '',
+    planned: typeof raw.planned === 'string' ? raw.planned : '',
+    launched: typeof raw.launched === 'string' ? raw.launched : '',
+    status: typeof raw.status === 'string' ? raw.status : '',
+    primaryIssue: typeof raw.primaryIssue === 'string' ? raw.primaryIssue : '',
+    subIssue: typeof raw.subIssue === 'string' ? raw.subIssue : '',
+    otherDetail: typeof raw.otherDetail === 'string' ? raw.otherDetail : '',
+    severity: typeof raw.severity === 'string' ? raw.severity : '',
+    rootCause: typeof raw.rootCause === 'string' ? raw.rootCause : '',
+    actions: normalizeNameList(Array.isArray(raw.actions) ? raw.actions : []),
+    operator: typeof raw.operator === 'string' ? raw.operator : '',
+    batteryId: typeof raw.batteryId === 'string' ? raw.batteryId : '',
+    delaySec: null,
+    commandRx: typeof raw.commandRx === 'string' ? raw.commandRx : '',
+    notes: typeof raw.notes === 'string' ? raw.notes : ''
+  };
+  const delay = toNumber(raw.delaySec);
+  entry.delaySec = Number.isFinite(delay) ? delay : null;
+  return entry;
 }
 
 function toNumber(value){

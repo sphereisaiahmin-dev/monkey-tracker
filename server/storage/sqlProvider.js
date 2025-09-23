@@ -199,6 +199,43 @@ class SqlProvider {
     return row ? this._mapArchiveRow(row) : null;
   }
 
+  async archiveShowNow(id){
+    if(!id){
+      return null;
+    }
+    const row = this._selectOne('SELECT data FROM shows WHERE id = ?', [id]);
+    if(!row){
+      return this.getArchivedShow(id);
+    }
+    let show;
+    try{
+      show = JSON.parse(row.data);
+    }catch(err){
+      show = null;
+    }
+    if(!show || typeof show !== 'object'){
+      return null;
+    }
+    const normalized = this._normalizeShow(show);
+    const archiveTime = Date.now();
+    normalized.archivedAt = archiveTime;
+    const showDate = typeof normalized.date === 'string' ? normalized.date.trim() : '';
+    this._run(`
+      INSERT INTO show_archive (id, data, show_date, created_at, archived_at)
+      VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET data = excluded.data, show_date = excluded.show_date, created_at = excluded.created_at, archived_at = excluded.archived_at
+    `, [
+      normalized.id,
+      JSON.stringify(normalized),
+      showDate,
+      this._stringifyTimestamp(this._getTimestamp(normalized.createdAt)),
+      this._stringifyTimestamp(archiveTime)
+    ]);
+    this._run('DELETE FROM shows WHERE id = ?', [normalized.id]);
+    await this._persistDatabase();
+    return this.getArchivedShow(id);
+  }
+
   async runArchiveMaintenance(){
     await this._refreshArchive();
   }

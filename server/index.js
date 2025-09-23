@@ -121,6 +121,16 @@ async function bootstrap(){
     res.status(204).end();
   }));
 
+  app.post('/api/shows/:id/archive', asyncHandler(async (req, res)=>{
+    const provider = getProvider();
+    const archived = await provider.archiveShowNow(req.params.id);
+    if(!archived){
+      res.status(404).json({error: 'Show not found'});
+      return;
+    }
+    res.json(archived);
+  }));
+
   app.post('/api/shows/:id/entries', asyncHandler(async (req, res)=>{
     const provider = getProvider();
     const entry = await provider.addEntry(req.params.id, req.body || {});
