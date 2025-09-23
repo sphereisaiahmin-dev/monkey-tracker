@@ -10,8 +10,14 @@
   <div class="topbar" role="banner">
     <div class="toolbar">
       <div class="row">
+        <button id="roleHome" class="btn ghost" type="button">← Choose role</button>
+        <div class="grow"></div>
+        <button id="refreshShows" type="button" class="btn ghost">Refresh data</button>
         <button id="configBtn" class="btn icon-btn" aria-haspopup="dialog" aria-expanded="false" aria-controls="configPanel" title="Open settings">⚙️</button>
+      </div>
+      <div class="row">
         <h1><span id="appTitle">Drone</span> Tracker</h1>
+        <span id="viewBadge" class="badge view-badge">Lead workspace</span>
       </div>
     </div>
   </div>
@@ -56,6 +62,14 @@
         <textarea id="webhookHeaders" placeholder="One per line, e.g., Authorization: Bearer token"></textarea>
         <div id="webhookPreview" class="webhook-preview" aria-live="polite"></div>
       </fieldset>
+      <fieldset id="exportFields" class="col-12 provider-fields">
+        <legend>Lead exports</legend>
+        <p class="help">Download the currently selected show for offline analysis.</p>
+        <div class="row" style="justify-content:flex-start; gap:10px;">
+          <button type="button" id="leadExportCsv" class="btn ghost">Export CSV</button>
+          <button type="button" id="leadExportJson" class="btn ghost">Export JSON</button>
+        </div>
+      </fieldset>
       <div class="col-12 row" style="justify-content: flex-end; gap: 10px;">
         <button type="button" id="cancelConfig" class="btn ghost">Cancel</button>
         <button type="submit" class="btn primary">Save settings</button>
@@ -67,30 +81,17 @@
   </div>
 
   <div class="container" role="main">
-    <section class="panel info-panel" aria-labelledby="welcomeTitle">
-      <div class="info-grid">
-        <div class="info-copy">
-          <h2 id="welcomeTitle">Live show dashboard</h2>
-          <p class="lead">Capture each run in real time. Start a new show, log entries, and keep everyone aligned.</p>
-          <ul class="quick-hints" role="list">
-            <li><strong>New Show</strong> creates a fresh record with default crew and units.</li>
-            <li><strong>Duplicate Current Show</strong> reuses the crew roster for the next run.</li>
-            <li>Adjust SQL.js storage settings and optional webhook delivery from the ⚙️ settings menu.</li>
-          </ul>
-        </div>
-        <div class="lan-status" aria-live="polite">
-          <div id="connectionStatus" class="connection-status is-pending">Checking server…</div>
-          <div class="lan-controls">
-            <span id="providerBadge" class="badge provider-sql" aria-label="Active storage provider">SQL.js storage v2</span>
-            <span id="webhookBadge" class="badge badge-webhook-off" aria-label="Webhook status">Webhook disabled</span>
-            <button id="refreshShows" type="button" class="btn ghost">Refresh data</button>
-          </div>
-          <div class="lan-target">LAN URL: <code id="lanAddress">http://10.241.211.120:3000</code></div>
-        </div>
+    <section id="landingView" class="panel landing-panel view-landing-only" aria-labelledby="landingTitle">
+      <h2 id="landingTitle">Choose workspace</h2>
+      <p class="lead">Select the role you need for this session.</p>
+      <div class="role-options">
+        <button id="chooseLead" type="button" class="btn primary role-btn">Lead</button>
+        <button id="choosePilot" type="button" class="btn role-btn">Pilot</button>
       </div>
+      <p class="help">Lead sets up shows and manages exports. Pilot logs entries against those shows.</p>
     </section>
 
-    <section class="panel" aria-labelledby="showHeaderTitle">
+    <section class="panel view-lead-only" aria-labelledby="showHeaderTitle">
       <h2 id="showHeaderTitle">Show header</h2>
       <div class="grid">
         <div class="col-3">
@@ -124,9 +125,14 @@
       </div>
     </section>
 
-    <section class="panel" aria-labelledby="entryTitle">
+    <section class="panel view-pilot-only" aria-labelledby="entryTitle">
       <h2 id="entryTitle">Entry form</h2>
       <div class="grid" id="entryForm">
+        <div class="col-12">
+          <label for="entryShowSelect">Assign to show</label>
+          <select id="entryShowSelect"></select>
+          <div id="pilotShowSummary" class="help">Select a show to start logging entries.</div>
+        </div>
         <div class="col-2">
           <label for="unitId"><span id="unitLabel">Monkey</span> ID</label>
           <select id="unitId"></select>
@@ -226,16 +232,14 @@
       </div>
     </section>
 
-    <section id="groups"></section>
+    <section id="groups" class="view-lead-only"></section>
   </div>
 
   <div class="sticky-footer" role="contentinfo">
     <div class="footer-grid">
-      <button id="newShow" class="btn span-3">New Show</button>
-      <button id="dupShow" class="btn span-3">Duplicate Current Show</button>
-      <button id="addLine" class="btn primary span-3">Add line</button>
-      <button id="exportCsv" class="btn ghost span-3">Export CSV</button>
-      <button id="exportJson" class="btn ghost span-3">Export JSON</button>
+      <button id="newShow" class="btn span-4 view-lead-only">New Show</button>
+      <button id="dupShow" class="btn span-4 view-lead-only">Duplicate Current Show</button>
+      <button id="addLine" class="btn primary span-4 view-pilot-only">Add line</button>
     </div>
   </div>
 

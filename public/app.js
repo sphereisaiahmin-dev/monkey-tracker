@@ -25,6 +25,7 @@ const state = {
   unitLabel: 'Drone',
   shows: [],
   currentShowId: null,
+  currentView: 'landing',
   editingEntryRef: null,
   serverHost: '10.241.211.120',
   serverPort: 3000,
@@ -90,6 +91,14 @@ const webhookMethod = el('webhookMethod');
 const webhookSecret = el('webhookSecret');
 const webhookHeaders = el('webhookHeaders');
 const webhookPreview = el('webhookPreview');
+const roleHomeBtn = el('roleHome');
+const viewBadge = el('viewBadge');
+const chooseLeadBtn = el('chooseLead');
+const choosePilotBtn = el('choosePilot');
+const entryShowSelect = el('entryShowSelect');
+const pilotShowSummary = el('pilotShowSummary');
+const leadExportCsvBtn = el('leadExportCsv');
+const leadExportJsonBtn = el('leadExportJson');
 const connectionStatusEl = el('connectionStatus');
 const providerBadge = el('providerBadge');
 const webhookBadge = el('webhookBadge');
@@ -106,14 +115,11 @@ async function init(){
   updateConnectionIndicator('loading');
   await loadShows();
   initUI();
-  fillHeader(getCurrentShow());
-  renderGroups();
-  updateIssueVisibility();
   populateUnitOptions();
   populateIssues();
   renderActionsChips(actionsChips, []);
-  renderOperatorOptions();
-  adjustContainerBottomPadding();
+  setCurrentShow(state.currentShowId || null);
+  setView('landing');
 }
 
 function initUI(){
@@ -137,11 +143,32 @@ function initUI(){
   leadPilotSelect.addEventListener('change', ()=> updateShowField('leadPilot', leadPilotSelect.value));
   monkeyLeadSelect.addEventListener('change', ()=> updateShowField('monkeyLead', monkeyLeadSelect.value));
 
-  el('newShow').addEventListener('click', onNewShow);
-  el('dupShow').addEventListener('click', onDuplicateShow);
-  el('addLine').addEventListener('click', onAddLine);
-  el('exportCsv').addEventListener('click', onExportCsv);
-  el('exportJson').addEventListener('click', onExportJson);
+  const newShowBtn = el('newShow');
+  const dupShowBtn = el('dupShow');
+  const addLineBtn = el('addLine');
+  if(newShowBtn){ newShowBtn.addEventListener('click', onNewShow); }
+  if(dupShowBtn){ dupShowBtn.addEventListener('click', onDuplicateShow); }
+  if(addLineBtn){ addLineBtn.addEventListener('click', onAddLine); }
+  if(leadExportCsvBtn){ leadExportCsvBtn.addEventListener('click', onExportCsv); }
+  if(leadExportJsonBtn){ leadExportJsonBtn.addEventListener('click', onExportJson); }
+
+  if(entryShowSelect){
+    entryShowSelect.addEventListener('change', ()=>{
+      setCurrentShow(entryShowSelect.value || null);
+    });
+  }
+  if(chooseLeadBtn){
+    chooseLeadBtn.addEventListener('click', ()=>{
+      setView('lead');
+      setCurrentShow(state.currentShowId || (state.shows[0]?.id ?? null));
+    });
+  }
+  if(choosePilotBtn){
+    choosePilotBtn.addEventListener('click', ()=> setView('pilot'));
+  }
+  if(roleHomeBtn){
+    roleHomeBtn.addEventListener('click', ()=> setView('landing'));
+  }
 
   el('closeEdit').addEventListener('click', closeEditModal);
   el('saveEdit').addEventListener('click', saveEditEntry);
@@ -237,6 +264,7 @@ async function loadConfig(){
 
 async function loadShows(){
   try{
+    const previousId = state.currentShowId;
     const data = await apiRequest('/api/shows');
     state.storageLabel = 'SQL.js storage v2';
     state.webhookStatus = {
@@ -247,7 +275,8 @@ async function loadShows(){
     };
     state.shows = Array.isArray(data.shows) ? data.shows : [];
     sortShows();
-    state.currentShowId = state.shows[0]?.id || null;
+    const fallbackId = state.shows[0]?.id || null;
+    state.currentShowId = previousId && state.shows.some(show=>show.id===previousId) ? previousId : fallbackId;
     updateConnectionIndicator();
     updateWebhookPreview();
   }catch(err){
@@ -269,10 +298,7 @@ async function onRefreshShows(){
   updateConnectionIndicator('loading');
   try{
     await loadShows();
-    fillHeader(getCurrentShow());
-    renderGroups();
-    updateIssueVisibility();
-    renderOperatorOptions();
+    setCurrentShow(state.currentShowId || null);
     toast('Data refreshed');
   }catch(err){
     console.error('Failed to refresh shows', err);
@@ -290,6 +316,72 @@ function getCurrentShow(){
     return null;
   }
   return state.shows.find(s=>s.id===state.currentShowId) || null;
+}
+
+function setCurrentShow(showId, options = {}){
+  const {skipPilotSync = false, skipRender = false} = options;
+  state.currentShowId = showId || null;
+  const show = getCurrentShow();
+  fillHeader(show);
+  renderOperatorOptions();
+  updateIssueVisibility();
+  if(!skipRender){
+    renderGroups();
+  }
+  updateWebhookPreview();
+  if(!skipPilotSync){
+    syncPilotShowSelect();
+  }else{
+    updatePilotSummary();
+  }
+}
+
+function syncPilotShowSelect(){
+  if(!entryShowSelect){
+    updatePilotSummary();
+    return;
+  }
+  const shows = state.shows.slice();
+  if(!shows.length){
+    entryShowSelect.innerHTML = '<option value="">No shows available</option>';
+    entryShowSelect.disabled = true;
+    entryShowSelect.value = '';
+    updatePilotSummary();
+    return;
+  }
+  entryShowSelect.disabled = false;
+  entryShowSelect.innerHTML = shows.map(show=>{
+    const date = formatDateUS(show.date) || 'MM-DD-YYYY';
+    const time = formatTime12Hour(show.time) || 'HH:mm';
+    const label = show.label ? ` • ${show.label}` : '';
+    return `<option value="${show.id}">${escapeHtml(`${date} • ${time}${label}`)}</option>`;
+  }).join('');
+  const hasCurrent = state.currentShowId && shows.some(show=>show.id===state.currentShowId);
+  const selectedId = hasCurrent ? state.currentShowId : shows[0].id;
+  entryShowSelect.value = selectedId;
+  if(!hasCurrent){
+    setCurrentShow(selectedId, {skipPilotSync: true});
+  }else{
+    updatePilotSummary();
+  }
+}
+
+function updatePilotSummary(){
+  if(!pilotShowSummary){
+    return;
+  }
+  const show = getCurrentShow();
+  if(!show){
+    pilotShowSummary.textContent = 'Lead must create a show before logging entries.';
+    return;
+  }
+  const date = formatDateUS(show.date) || 'Date TBD';
+  const time = formatTime12Hour(show.time) || 'Time TBD';
+  const parts = [`Logging to ${date} • ${time}`];
+  if(show.label){ parts.push(show.label); }
+  if(show.leadPilot){ parts.push(`Lead: ${show.leadPilot}`); }
+  if(show.monkeyLead){ parts.push(`Monkey lead: ${show.monkeyLead}`); }
+  pilotShowSummary.textContent = parts.join(' • ');
 }
 
 function upsertShow(show){
@@ -412,10 +504,8 @@ async function onNewShow(){
   try{
     const payload = await apiRequest('/api/shows', {method:'POST', body: JSON.stringify({})});
     upsertShow(payload);
-    state.currentShowId = payload.id;
-    fillHeader(payload);
+    setCurrentShow(payload.id);
     clearEntryForm();
-    renderGroups();
     toast('New show created');
   }catch(err){
     console.error(err);
@@ -441,10 +531,8 @@ async function onDuplicateShow(){
     };
     const payload = await apiRequest('/api/shows', {method:'POST', body: JSON.stringify(dupPayload)});
     upsertShow(payload);
-    state.currentShowId = payload.id;
-    fillHeader(payload);
+    setCurrentShow(payload.id);
     clearEntryForm();
-    renderGroups();
     toast('Show duplicated');
   }catch(err){
     console.error(err);
@@ -460,11 +548,7 @@ async function updateShowField(field, value){
   try{
     const updated = await apiRequest(`/api/shows/${show.id}`, {method:'PUT', body: JSON.stringify({[field]: value})});
     upsertShow(updated);
-    state.currentShowId = updated.id;
-    if(field === 'crew'){
-      renderOperatorOptions();
-    }
-    renderGroups();
+    setCurrentShow(updated.id);
   }catch(err){
     console.error(err);
     toast('Failed to update show', true);
@@ -472,9 +556,13 @@ async function updateShowField(field, value){
 }
 
 async function onAddLine(){
+  if(state.currentView !== 'pilot'){
+    toast('Switch to the Pilot workspace to log entries', true);
+    return;
+  }
   const show = getCurrentShow();
   if(!show){
-    toast('Create a show first', true);
+    toast('Select or create a show first', true);
     return;
   }
   clearErrors();
@@ -522,9 +610,8 @@ async function onAddLine(){
     await apiRequest(`/api/shows/${show.id}/entries`, {method:'POST', body: JSON.stringify(entry)});
     const updatedShow = await apiRequest(`/api/shows/${show.id}`, {method:'GET'});
     upsertShow(updatedShow);
-    state.currentShowId = updatedShow.id;
+    setCurrentShow(updatedShow.id);
     clearEntryForm();
-    renderGroups();
     toast('Line added');
   }catch(err){
     console.error(err);
@@ -564,9 +651,7 @@ function renderGroups(){
     summary.addEventListener('click', ()=>{
       setTimeout(()=>{
         if(group.open){
-          state.currentShowId = show.id;
-          fillHeader(show);
-          renderOperatorOptions();
+          setCurrentShow(show.id, {skipRender: true});
         }
       }, 0);
     });
@@ -670,7 +755,7 @@ async function deleteEntry(showId, entryId){
     await apiRequest(`/api/shows/${showId}/entries/${entryId}`, {method:'DELETE'});
     const updatedShow = await apiRequest(`/api/shows/${showId}`, {method:'GET'});
     upsertShow(updatedShow);
-    renderGroups();
+    setCurrentShow(updatedShow.id);
     toast('Entry deleted');
   }catch(err){
     console.error(err);
@@ -772,7 +857,7 @@ async function saveEditEntry(){
     await apiRequest(`/api/shows/${show.id}/entries/${state.editingEntryRef.entryId}`, {method:'PUT', body: JSON.stringify(entryUpdate)});
     const updatedShow = await apiRequest(`/api/shows/${show.id}`, {method:'GET'});
     upsertShow(updatedShow);
-    renderGroups();
+    setCurrentShow(updatedShow.id);
     closeEditModal();
     toast('Entry updated');
   }catch(err){
@@ -921,6 +1006,34 @@ function renderOperatorOptions(){
   operator.innerHTML = '<option value="">Select</option>' + Array.from(names).map(name=>`<option ${current===name?'selected':''}>${escapeHtml(name)}</option>`).join('');
 }
 
+function setView(view){
+  state.currentView = view;
+  document.body.classList.remove('view-landing','view-lead','view-pilot');
+  document.body.classList.add(`view-${view}`);
+  if(viewBadge){
+    if(view === 'landing'){
+      viewBadge.hidden = true;
+      viewBadge.classList.remove('view-badge-pilot');
+    }else{
+      viewBadge.hidden = false;
+      viewBadge.textContent = view === 'pilot' ? 'Pilot workspace' : 'Lead workspace';
+      viewBadge.classList.toggle('view-badge-pilot', view === 'pilot');
+    }
+  }
+  if(roleHomeBtn){
+    roleHomeBtn.hidden = view === 'landing';
+  }
+  if(view === 'landing'){
+    toggleConfig(false);
+  }
+  if(view === 'pilot'){
+    syncPilotShowSelect();
+  }else{
+    updatePilotSummary();
+  }
+  adjustContainerBottomPadding();
+}
+
 function toggleConfig(open){
   configBtn.setAttribute('aria-expanded', String(open));
   configPanel.classList.toggle('open', open);
@@ -976,9 +1089,7 @@ async function onConfigSubmit(event){
     updateWebhookPreview();
     updateConnectionIndicator('loading');
     await loadShows();
-    fillHeader(getCurrentShow());
-    renderGroups();
-    renderOperatorOptions();
+    setCurrentShow(state.currentShowId || null);
     configMessage.textContent = 'Settings saved. Storage restarted.';
     toggleConfig(false);
     toast('Settings updated');
