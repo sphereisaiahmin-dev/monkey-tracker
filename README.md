@@ -9,7 +9,7 @@ This project exposes the **Drone Tracker** interface as a full web application b
 - SQL.js storage provider (v2) implemented with `sql.js` so no native builds are required. The server creates the database file if it does not exist.
 - Configurable application settings from the in-app settings panel (unit label, webhook delivery settings, and roster management).
 - Optional per-entry webhook export that mirrors the CSV column structure so downstream tables align perfectly with local exports.
-- CSV and JSON export for the active show.
+- Archive workspace that retains shows for two months and supports CSV/JSON exports.
 - Entry editor modal with validation consistent with the original workflow.
 
 ## Getting Started

@@ -78,6 +78,12 @@ async function bootstrap(){
     res.json({storage: 'sql.js v2', webhook: getWebhookStatus(), shows});
   }));
 
+  app.get('/api/shows/archive', asyncHandler(async (req, res)=>{
+    const provider = getProvider();
+    const shows = await provider.listArchivedShows();
+    res.json({shows});
+  }));
+
   app.post('/api/shows', asyncHandler(async (req, res)=>{
     const provider = getProvider();
     const show = await provider.createShow(req.body || {});
