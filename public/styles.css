@@ -46,17 +46,21 @@ a{color:var(--primary);text-decoration:none}
 }
 #roleHome{display:none}
 body.view-lead #roleHome,
-body.view-pilot #roleHome{display:inline-flex}
+body.view-pilot #roleHome,
+body.view-archive #roleHome{display:inline-flex}
 #viewBadge{display:none}
 body.view-lead #viewBadge,
-body.view-pilot #viewBadge{display:inline-flex}
+body.view-pilot #viewBadge,
+body.view-archive #viewBadge{display:inline-flex}
 body.view-landing #refreshShows{display:none}
 .view-lead-only,
 .view-pilot-only,
-.view-landing-only{display:none !important}
+.view-landing-only,
+.view-archive-only{display:none !important}
 body.view-lead .view-lead-only{display:block !important}
 body.view-pilot .view-pilot-only{display:block !important}
 body.view-landing .view-landing-only{display:block !important}
+body.view-archive .view-archive-only{display:block !important}
 #landingView{display:none;text-align:center;padding:38px 20px}
 body.view-landing #landingView{display:block}
 .role-options{
@@ -198,6 +202,48 @@ body.view-pilot .topbar-actions{
   border-color:rgba(255,255,255,.18);
   backdrop-filter:blur(8px);
 }
+.archive-grid{align-items:flex-start;gap:20px;}
+.archive-details{min-height:140px;}
+.archive-card{
+  background:var(--input);
+  border:1px solid var(--border);
+  border-radius:var(--radius);
+  padding:16px;
+}
+.archive-info{
+  display:grid;
+  grid-template-columns:repeat(auto-fit, minmax(160px,1fr));
+  gap:12px;
+}
+.archive-info div{border:none;padding:0;}
+.archive-info dt{
+  margin:0 0 4px;
+  font-size:12px;
+  text-transform:uppercase;
+  letter-spacing:.08em;
+  color:var(--text-dim);
+}
+.archive-info dd{
+  margin:0;
+  font-size:15px;
+  color:var(--text);
+}
+.archive-notes{
+  margin-top:16px;
+  padding-top:12px;
+  border-top:1px solid var(--border);
+}
+.archive-notes h3{
+  margin:0 0 6px;
+  font-size:13px;
+  letter-spacing:.08em;
+  text-transform:uppercase;
+  color:var(--text-dim);
+}
+.archive-notes p{margin:0;font-size:14px;line-height:1.4;color:var(--text);}
+.archive-actions{margin-top:16px;justify-content:flex-start;}
+#archiveMeta{margin-top:8px;color:var(--text-dim);font-size:13px;}
+#archiveEmpty{margin-top:12px;color:var(--text-dim);font-size:14px;}
 .panel:hover{transform:translateY(-2px); box-shadow:0 16px 40px rgba(0,0,0,.45);}
 .info-panel{padding:20px;display:flex}
 .info-grid{display:flex;flex-direction:column;gap:18px;width:100%}

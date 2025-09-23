@@ -43,6 +43,8 @@ const state = {
   storageLabel: 'SQL.js storage v2',
   newShowDraft: createEmptyShowDraft(),
   isCreatingShow: false,
+  archivedShows: [],
+  currentArchivedShowId: null,
   webhookConfig: {
     enabled: false,
     url: '',
@@ -129,10 +131,16 @@ const roleHomeBtn = el('roleHome');
 const viewBadge = el('viewBadge');
 const chooseLeadBtn = el('chooseLead');
 const choosePilotBtn = el('choosePilot');
+const chooseArchiveBtn = el('chooseArchive');
 const entryShowSelect = el('entryShowSelect');
 const pilotShowSummary = el('pilotShowSummary');
-const leadExportCsvBtn = el('leadExportCsv');
-const leadExportJsonBtn = el('leadExportJson');
+const archiveShowSelect = el('archiveShowSelect');
+const archiveDetails = el('archiveDetails');
+const archiveMeta = el('archiveMeta');
+const archiveEmpty = el('archiveEmpty');
+const archiveExportCsvBtn = el('archiveExportCsv');
+const archiveExportJsonBtn = el('archiveExportJson');
+const refreshArchiveBtn = el('refreshArchive');
 const connectionStatusEl = el('connectionStatus');
 const providerBadge = el('providerBadge');
 const webhookBadge = el('webhookBadge');
@@ -203,8 +211,6 @@ function initUI(){
   const addLineBtn = el('addLine');
   if(newShowBtn){ newShowBtn.addEventListener('click', onNewShow); }
   if(addLineBtn){ addLineBtn.addEventListener('click', onAddLine); }
-  if(leadExportCsvBtn){ leadExportCsvBtn.addEventListener('click', onExportCsv); }
-  if(leadExportJsonBtn){ leadExportJsonBtn.addEventListener('click', onExportJson); }
 
   if(entryShowSelect){
     entryShowSelect.addEventListener('change', ()=>{
@@ -219,6 +225,20 @@ function initUI(){
   }
   if(choosePilotBtn){
     choosePilotBtn.addEventListener('click', ()=> setView('pilot'));
+  }
+  if(chooseArchiveBtn){
+    chooseArchiveBtn.addEventListener('click', openArchiveWorkspace);
+  }
+  if(archiveShowSelect){
+    archiveShowSelect.addEventListener('change', ()=>{
+      setCurrentArchivedShow(archiveShowSelect.value || null);
+    });
+  }
+  if(archiveExportCsvBtn){
+    archiveExportCsvBtn.addEventListener('click', ()=> exportSelectedArchive('csv'));
+  }
+  if(archiveExportJsonBtn){
+    archiveExportJsonBtn.addEventListener('click', ()=> exportSelectedArchive('json'));
   }
   if(roleHomeBtn){
     roleHomeBtn.addEventListener('click', ()=> setView('landing'));
@@ -300,6 +320,10 @@ function initUI(){
   if(refreshShowsBtn){
     refreshShowsBtn.dataset.label = refreshShowsBtn.textContent;
     refreshShowsBtn.addEventListener('click', onRefreshShows);
+  }
+  if(refreshArchiveBtn){
+    refreshArchiveBtn.dataset.label = refreshArchiveBtn.textContent;
+    refreshArchiveBtn.addEventListener('click', onRefreshArchiveList);
   }
 
   document.addEventListener('click', event=>{
@@ -387,12 +411,50 @@ async function loadShows(){
     state.currentShowId = previousId && state.shows.some(show=>show.id===previousId) ? previousId : fallbackId;
     updateConnectionIndicator();
     updateWebhookPreview();
+    await loadArchivedShows({silent: true, preserveSelection: true});
   }catch(err){
     console.error('Failed to load shows', err);
     state.shows = [];
     state.currentShowId = null;
     toast('Failed to load shows', true);
     updateConnectionIndicator('error');
+  }
+}
+
+async function openArchiveWorkspace(){
+  setView('archive');
+  renderArchiveSelect();
+  await loadArchivedShows({silent: true, preserveSelection: true});
+}
+
+async function loadArchivedShows(options = {}){
+  const {silent = false, preserveSelection = false} = options;
+  try{
+    const data = await apiRequest('/api/shows/archive');
+    const shows = Array.isArray(data.shows) ? data.shows.map(normalizeArchivedShow) : [];
+    shows.sort((a, b)=> (Number.isFinite(b.archivedAt) ? b.archivedAt : 0) - (Number.isFinite(a.archivedAt) ? a.archivedAt : 0));
+    state.archivedShows = shows;
+    if(preserveSelection){
+      const hasCurrent = state.currentArchivedShowId && state.archivedShows.some(show=>show.id === state.currentArchivedShowId);
+      if(!hasCurrent){
+        state.currentArchivedShowId = state.archivedShows[0]?.id || null;
+      }
+    }else{
+      state.currentArchivedShowId = state.archivedShows[0]?.id || null;
+    }
+    renderArchiveSelect();
+    return true;
+  }catch(err){
+    console.error('Failed to load archive', err);
+    if(!silent){
+      toast('Failed to load archive', true);
+    }
+    if(!preserveSelection){
+      state.archivedShows = [];
+      state.currentArchivedShowId = null;
+      renderArchiveSelect();
+    }
+    return false;
   }
 }
 
@@ -415,6 +477,28 @@ async function onRefreshShows(){
     if(refreshShowsBtn){
       refreshShowsBtn.disabled = false;
       refreshShowsBtn.textContent = originalLabel || 'Refresh data';
+    }
+  }
+}
+
+async function onRefreshArchiveList(){
+  let originalLabel = '';
+  if(refreshArchiveBtn){
+    originalLabel = refreshArchiveBtn.dataset.label || refreshArchiveBtn.textContent;
+    refreshArchiveBtn.disabled = true;
+    refreshArchiveBtn.textContent = 'Refreshing…';
+  }
+  try{
+    const success = await loadArchivedShows({silent: false, preserveSelection: true});
+    if(success){
+      toast('Archive refreshed');
+    }
+  }catch(err){
+    console.error('Failed to refresh archive', err);
+  }finally{
+    if(refreshArchiveBtn){
+      refreshArchiveBtn.disabled = false;
+      refreshArchiveBtn.textContent = originalLabel || 'Refresh archive';
     }
   }
 }
@@ -612,6 +696,118 @@ function updatePilotSummary(){
   if(show.leadPilot){ parts.push(`Lead: ${show.leadPilot}`); }
   if(show.monkeyLead){ parts.push(`Monkey lead: ${show.monkeyLead}`); }
   pilotShowSummary.textContent = parts.join(' • ');
+}
+
+function renderArchiveSelect(){
+  if(!archiveShowSelect){
+    return;
+  }
+  const shows = Array.isArray(state.archivedShows) ? state.archivedShows : [];
+  if(!shows.length){
+    archiveShowSelect.innerHTML = '<option value="">No archived shows</option>';
+    archiveShowSelect.disabled = true;
+    if(archiveMeta){
+      archiveMeta.textContent = 'Shows archive will populate once daily records are archived.';
+    }
+    renderArchiveDetails(null);
+    return;
+  }
+  archiveShowSelect.disabled = false;
+  archiveShowSelect.innerHTML = shows.map(show=>{
+    const date = formatDateUS(show.date) || 'MM-DD-YYYY';
+    const time = formatTime12Hour(show.time) || 'HH:mm';
+    const label = show.label ? ` • ${show.label}` : '';
+    return `<option value="${show.id}">${escapeHtml(`${date} • ${time}${label}`)}</option>`;
+  }).join('');
+  const hasCurrent = state.currentArchivedShowId && shows.some(show=>show.id === state.currentArchivedShowId);
+  const selectedId = hasCurrent ? state.currentArchivedShowId : shows[0].id;
+  archiveShowSelect.value = selectedId;
+  setCurrentArchivedShow(selectedId, {skipSelectUpdate: true});
+}
+
+function setCurrentArchivedShow(showId, options = {}){
+  const {skipSelectUpdate = false} = options;
+  state.currentArchivedShowId = showId || null;
+  if(!skipSelectUpdate && archiveShowSelect){
+    if(showId && state.archivedShows.some(show=>show.id === showId)){
+      archiveShowSelect.value = showId;
+    }else if(state.archivedShows[0]){
+      archiveShowSelect.value = state.archivedShows[0].id;
+    }else{
+      archiveShowSelect.value = '';
+    }
+  }
+  renderArchiveDetails(getArchivedShow(state.currentArchivedShowId));
+}
+
+function getArchivedShow(showId){
+  if(!showId){
+    return null;
+  }
+  return state.archivedShows.find(show=>show.id === showId) || null;
+}
+
+function renderArchiveDetails(show){
+  if(!archiveDetails){
+    return;
+  }
+  if(!show){
+    archiveDetails.innerHTML = '<p class="help">Select an archived show to review its summary.</p>';
+    if(archiveMeta){
+      archiveMeta.textContent = 'Shows move here automatically 24 hours after creation and remain for two months.';
+    }
+    if(archiveEmpty){
+      archiveEmpty.hidden = !(Array.isArray(state.archivedShows) && state.archivedShows.length === 0);
+    }
+    if(archiveExportCsvBtn){ archiveExportCsvBtn.disabled = true; }
+    if(archiveExportJsonBtn){ archiveExportJsonBtn.disabled = true; }
+    return;
+  }
+  if(archiveEmpty){
+    archiveEmpty.hidden = true;
+  }
+  const crewList = Array.isArray(show.crew) && show.crew.length ? show.crew.join(', ') : '—';
+  const entries = Array.isArray(show.entries) ? show.entries : [];
+  const rows = [
+    ['Date', formatDateUS(show.date) || show.date || '—'],
+    ['Time', formatTime12Hour(show.time) || show.time || '—'],
+    ['Label', show.label || '—'],
+    ['Lead pilot', show.leadPilot || '—'],
+    ['Monkey lead', show.monkeyLead || '—'],
+    ['Crew', crewList],
+    ['Entries logged', String(entries.length)]
+  ];
+  archiveDetails.innerHTML = `
+    <div class="archive-card">
+      <dl class="archive-info">
+        ${rows.map(([label, value])=>`<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join('')}
+      </dl>
+      ${show.notes ? `<div class="archive-notes"><h3>Show notes</h3><p>${escapeHtml(show.notes)}</p></div>` : ''}
+    </div>
+  `;
+  if(archiveMeta){
+    const archived = formatDateTime(show.archivedAt);
+    const created = formatDateTime(show.createdAt);
+    const metaParts = [];
+    if(archived){ metaParts.push(`Archived ${archived}`); }
+    if(created){ metaParts.push(`Created ${created}`); }
+    archiveMeta.textContent = metaParts.join(' • ');
+  }
+  if(archiveExportCsvBtn){ archiveExportCsvBtn.disabled = false; }
+  if(archiveExportJsonBtn){ archiveExportJsonBtn.disabled = false; }
+}
+
+function exportSelectedArchive(format){
+  const show = getArchivedShow(state.currentArchivedShowId);
+  if(!show){
+    toast('Select an archived show first', true);
+    return;
+  }
+  if(format === 'csv'){
+    exportShowAsCsv(show);
+  }else{
+    exportShowAsJson(show);
+  }
 }
 
 function upsertShow(show){
@@ -1410,7 +1606,7 @@ function renderOperatorOptions(){
 
 function setView(view){
   state.currentView = view;
-  document.body.classList.remove('view-landing','view-lead','view-pilot');
+  document.body.classList.remove('view-landing','view-lead','view-pilot','view-archive');
   document.body.classList.add(`view-${view}`);
   if(viewBadge){
     if(view === 'landing'){
@@ -1418,8 +1614,16 @@ function setView(view){
       viewBadge.classList.remove('view-badge-pilot');
     }else{
       viewBadge.hidden = false;
-      viewBadge.textContent = view === 'pilot' ? 'Pilot workspace' : 'Lead workspace';
-      viewBadge.classList.toggle('view-badge-pilot', view === 'pilot');
+      if(view === 'pilot'){
+        viewBadge.textContent = 'Pilot workspace';
+        viewBadge.classList.add('view-badge-pilot');
+      }else if(view === 'archive'){
+        viewBadge.textContent = 'Archive workspace';
+        viewBadge.classList.remove('view-badge-pilot');
+      }else{
+        viewBadge.textContent = 'Lead workspace';
+        viewBadge.classList.remove('view-badge-pilot');
+      }
     }
   }
   if(roleHomeBtn){
@@ -1432,6 +1636,9 @@ function setView(view){
     syncPilotShowSelect();
   }else{
     updatePilotSummary();
+  }
+  if(view === 'archive'){
+    renderArchiveSelect();
   }
 }
 
@@ -1612,10 +1819,9 @@ async function onConfigSubmit(event){
   }
 }
 
-function onExportCsv(){
-  const show = getCurrentShow();
+function exportShowAsCsv(show){
   if(!show){
-    toast('No current show', true);
+    toast('No show selected', true);
     return;
   }
   const rows = (show.entries||[]).map(entry=>{
@@ -1627,10 +1833,9 @@ function onExportCsv(){
   toast('CSV exported');
 }
 
-function onExportJson(){
-  const show = getCurrentShow();
+function exportShowAsJson(show){
   if(!show){
-    toast('No current show', true);
+    toast('No show selected', true);
     return;
   }
   const json = JSON.stringify(show, null, 2);
@@ -1925,8 +2130,48 @@ function formatTime12Hour(timeStr){
   return `${hour}:${m} ${suffix}`;
 }
 
+function formatDateTime(value){
+  const timestamp = toNumber(value);
+  if(timestamp === null){
+    return '';
+  }
+  try{
+    return new Date(timestamp).toLocaleString(undefined, {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  }catch(err){
+    return '';
+  }
+}
+
 function escapeHtml(str){
   return String(str || '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+}
+
+function normalizeArchivedShow(raw = {}){
+  const show = {
+    id: raw.id,
+    date: typeof raw.date === 'string' ? raw.date : '',
+    time: typeof raw.time === 'string' ? raw.time : '',
+    label: typeof raw.label === 'string' ? raw.label : '',
+    leadPilot: typeof raw.leadPilot === 'string' ? raw.leadPilot : '',
+    monkeyLead: typeof raw.monkeyLead === 'string' ? raw.monkeyLead : '',
+    notes: typeof raw.notes === 'string' ? raw.notes : '',
+    crew: Array.isArray(raw.crew) ? raw.crew.map(name=> typeof name === 'string' ? name : '').filter(Boolean) : [],
+    entries: Array.isArray(raw.entries) ? raw.entries.map(entry => ({...entry})) : [],
+    createdAt: toNumber(raw.createdAt),
+    archivedAt: toNumber(raw.archivedAt)
+  };
+  return show;
+}
+
+function toNumber(value){
+  const num = Number(value);
+  return Number.isFinite(num) ? num : null;
 }
 
 async function apiRequest(url, options){

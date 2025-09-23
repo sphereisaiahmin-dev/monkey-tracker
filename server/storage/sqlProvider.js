@@ -3,6 +3,8 @@ const path = require('path');
 const initSqlJs = require('sql.js');
 const { v4: uuidv4 } = require('uuid');
 
+const DAY_IN_MS = 24 * 60 * 60 * 1000;
+const ARCHIVE_RETENTION_MONTHS = 2;
 const DEFAULT_PILOTS = ['Alex','Nick','John Henery','James','Robert','Nazar'];
 const DEFAULT_CREW = ['Alex','Nick','John Henery','James','Robert','Nazar'];
 const DEFAULT_MONKEY_LEADS = ['Cleo','Bret','Leslie','Dallas'];
@@ -47,6 +49,8 @@ class SqlProvider {
     if(shouldPersist){
       await this._persistDatabase();
     }
+
+    await this._refreshArchive();
   }
 
   async dispose(){
@@ -57,26 +61,37 @@ class SqlProvider {
   }
 
   async listShows(){
+    await this._refreshArchive();
     const rows = this._select('SELECT data FROM shows ORDER BY updated_at DESC');
     return rows.map(r => JSON.parse(r.data));
   }
 
   async getShow(id){
+    await this._refreshArchive();
     const row = this._selectOne('SELECT data FROM shows WHERE id = ?', [id]);
     return row ? JSON.parse(row.data) : null;
   }
 
   async createShow(input){
+    const payload = input || {};
     const now = Date.now();
+    const createdAtCandidate = Number(payload.createdAt);
+    const updatedAtCandidate = Number(payload.updatedAt);
+    const createdAt = Number.isFinite(createdAtCandidate) ? createdAtCandidate : now;
+    let updatedAt = Number.isFinite(updatedAtCandidate) ? updatedAtCandidate : now;
+    if(updatedAt < createdAt){
+      updatedAt = createdAt;
+    }
     const show = this._normalizeShow({
-      ...input,
-      id: input.id || uuidv4(),
-      createdAt: now,
-      updatedAt: now,
-      entries: Array.isArray(input.entries) ? input.entries : []
+      ...payload,
+      id: payload.id || uuidv4(),
+      createdAt,
+      updatedAt,
+      entries: Array.isArray(payload.entries) ? payload.entries : []
     });
     await this._enforceShowLimit(show.date, show.id);
     await this._persist(show);
+    await this._refreshArchive();
     return show;
   }
 
@@ -92,12 +107,14 @@ class SqlProvider {
     });
     await this._enforceShowLimit(updated.date, updated.id);
     await this._persist(updated);
+    await this._refreshArchive();
     return updated;
   }
 
   async deleteShow(id){
     this._run('DELETE FROM shows WHERE id = ?', [id]);
     await this._persistDatabase();
+    await this._refreshArchive();
   }
 
   async addEntry(showId, entryInput){
@@ -119,6 +136,7 @@ class SqlProvider {
     }
     show.updatedAt = Date.now();
     await this._persist(show);
+    await this._refreshArchive();
     return entry;
   }
 
@@ -139,6 +157,7 @@ class SqlProvider {
     show.entries[idx] = entry;
     show.updatedAt = Date.now();
     await this._persist(show);
+    await this._refreshArchive();
     return entry;
   }
 
@@ -154,13 +173,34 @@ class SqlProvider {
     show.entries.splice(idx, 1);
     show.updatedAt = Date.now();
     await this._persist(show);
+    await this._refreshArchive();
     return true;
   }
 
   async replaceShow(show){
     const normalized = this._normalizeShow(show);
     await this._persist(normalized);
+    await this._refreshArchive();
     return normalized;
+  }
+
+  async listArchivedShows(){
+    await this._refreshArchive();
+    const rows = this._select('SELECT data, archived_at, created_at FROM show_archive ORDER BY archived_at DESC, id ASC');
+    return rows.map(row => this._mapArchiveRow(row)).filter(Boolean);
+  }
+
+  async getArchivedShow(id){
+    if(!id){
+      return null;
+    }
+    await this._refreshArchive();
+    const row = this._selectOne('SELECT data, archived_at, created_at FROM show_archive WHERE id = ?', [id]);
+    return row ? this._mapArchiveRow(row) : null;
+  }
+
+  async runArchiveMaintenance(){
+    await this._refreshArchive();
   }
 
   async getStaff(){
@@ -334,6 +374,29 @@ class SqlProvider {
       `);
     }
 
+    if(!this._tableExists('show_archive')){
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS show_archive (
+          id TEXT PRIMARY KEY,
+          data TEXT NOT NULL,
+          show_date TEXT,
+          created_at TEXT,
+          archived_at TEXT NOT NULL
+        )
+      `);
+      mutated = true;
+    }else{
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS show_archive (
+          id TEXT PRIMARY KEY,
+          data TEXT NOT NULL,
+          show_date TEXT,
+          created_at TEXT,
+          archived_at TEXT NOT NULL
+        )
+      `);
+    }
+
     return mutated;
   }
 
@@ -461,6 +524,182 @@ class SqlProvider {
     const data = this.db.export();
     const buffer = Buffer.from(data);
     await fs.promises.writeFile(this.filename, buffer);
+  }
+
+  async _refreshArchive(){
+    if(!this.db){
+      return;
+    }
+    let mutated = false;
+    mutated = (await this._archiveDailyShows()) || mutated;
+    mutated = (await this._purgeExpiredArchives()) || mutated;
+    if(mutated){
+      await this._persistDatabase();
+    }
+  }
+
+  async _archiveDailyShows(){
+    const rows = this._select('SELECT id, data FROM shows');
+    if(!rows.length){
+      return false;
+    }
+    const groups = new Map();
+    rows.forEach(row => {
+      let show;
+      try{
+        show = JSON.parse(row.data);
+      }catch(err){
+        show = null;
+      }
+      if(!show || typeof show !== 'object'){
+        return;
+      }
+      const key = typeof show.date === 'string' && show.date.trim() ? show.date.trim() : '__undated__';
+      const createdAt = this._getTimestamp(show.createdAt) ?? this._getTimestamp(show.updatedAt);
+      if(!groups.has(key)){
+        groups.set(key, []);
+      }
+      groups.get(key).push({show, createdAt});
+    });
+    const now = Date.now();
+    let changed = false;
+    for(const [key, list] of groups.entries()){
+      const earliest = list.reduce((min, item)=>{
+        const value = this._getTimestamp(item.createdAt);
+        if(value === null){
+          return min;
+        }
+        if(min === null || value < min){
+          return value;
+        }
+        return min;
+      }, null);
+      if(earliest === null){
+        continue;
+      }
+      if(now - earliest >= DAY_IN_MS){
+        const archiveTime = Date.now();
+        list.forEach(item =>{
+          const show = item.show;
+          const payload = JSON.stringify(show);
+          this._run(`
+            INSERT INTO show_archive (id, data, show_date, created_at, archived_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET data = excluded.data, show_date = excluded.show_date, created_at = excluded.created_at, archived_at = excluded.archived_at
+          `, [
+            show.id,
+            payload,
+            key === '__undated__' ? '' : key,
+            this._stringifyTimestamp(this._getTimestamp(show.createdAt)),
+            this._stringifyTimestamp(archiveTime)
+          ]);
+          this._run('DELETE FROM shows WHERE id = ?', [show.id]);
+          changed = true;
+        });
+      }
+    }
+    return changed;
+  }
+
+  async _purgeExpiredArchives(){
+    const rows = this._select('SELECT id, data, created_at FROM show_archive');
+    if(!rows.length){
+      return false;
+    }
+    const now = Date.now();
+    const expiredIds = [];
+    rows.forEach(row =>{
+      let show;
+      try{
+        show = JSON.parse(row.data);
+      }catch(err){
+        show = null;
+      }
+      const createdAt = this._getTimestamp(show?.createdAt) ?? this._getTimestamp(row.created_at);
+      if(createdAt === null){
+        return;
+      }
+      if(this._isArchiveExpired(createdAt, now)){
+        expiredIds.push(row.id);
+      }
+    });
+    if(!expiredIds.length){
+      return false;
+    }
+    expiredIds.forEach(id => this._run('DELETE FROM show_archive WHERE id = ?', [id]));
+    return true;
+  }
+
+  _mapArchiveRow(row){
+    if(!row){
+      return null;
+    }
+    let show;
+    try{
+      show = JSON.parse(row.data);
+    }catch(err){
+      return null;
+    }
+    if(!show || typeof show !== 'object'){
+      return null;
+    }
+    const archivedAt = this._getTimestamp(row.archived_at) ?? this._getTimestamp(show.archivedAt);
+    const storedCreated = this._getTimestamp(row.created_at);
+    const createdAt = this._getTimestamp(show.createdAt) ?? storedCreated;
+    if(archivedAt !== null){
+      show.archivedAt = archivedAt;
+    }
+    if(createdAt !== null){
+      show.createdAt = createdAt;
+    }
+    if(!Array.isArray(show.entries)){
+      show.entries = [];
+    }
+    if(!Array.isArray(show.crew)){
+      show.crew = [];
+    }
+    return show;
+  }
+
+  _getTimestamp(value){
+    if(typeof value === 'number' && Number.isFinite(value)){
+      return value;
+    }
+    const numeric = Number(value);
+    if(Number.isFinite(numeric)){
+      return numeric;
+    }
+    if(typeof value === 'string'){
+      const parsed = Date.parse(value);
+      if(Number.isFinite(parsed)){
+        return parsed;
+      }
+    }
+    return null;
+  }
+
+  _stringifyTimestamp(value){
+    return Number.isFinite(value) ? String(value) : null;
+  }
+
+  _isArchiveExpired(createdAt, now = Date.now()){
+    if(!Number.isFinite(createdAt)){
+      return false;
+    }
+    const expiry = this._addMonths(createdAt, ARCHIVE_RETENTION_MONTHS);
+    return now >= expiry;
+  }
+
+  _addMonths(timestamp, months){
+    if(!Number.isFinite(timestamp)){
+      return timestamp;
+    }
+    const date = new Date(timestamp);
+    if(Number.isNaN(date.getTime())){
+      return timestamp;
+    }
+    date.setMonth(date.getMonth() + months);
+    return date.getTime();
   }
 
   async _fileExists(filePath){

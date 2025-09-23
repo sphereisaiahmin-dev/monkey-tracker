@@ -42,14 +42,6 @@
             <label for="crewList">Crew</label>
             <textarea id="crewList" class="list-input" placeholder="e.g., Jamie"></textarea>
           </fieldset>
-          <fieldset id="exportFields" class="col-12 provider-fields">
-            <legend>Lead exports</legend>
-            <p class="help">Download the currently selected show for offline analysis.</p>
-            <div class="row" style="justify-content:flex-start; gap:10px;">
-              <button type="button" id="leadExportCsv" class="btn ghost">Export CSV</button>
-              <button type="button" id="leadExportJson" class="btn ghost">Export JSON</button>
-            </div>
-          </fieldset>
         </section>
         <section class="config-section grid" data-config-section="admin" aria-hidden="true">
           <div class="col-12">
@@ -129,8 +121,33 @@
       <div class="role-options">
         <button id="chooseLead" type="button" class="btn primary role-btn">Lead</button>
         <button id="choosePilot" type="button" class="btn role-btn">Pilot</button>
+        <button id="chooseArchive" type="button" class="btn ghost role-btn">Archive</button>
       </div>
       <p class="help">Lead sets up shows and manages exports. Pilot logs entries against those shows.</p>
+    </section>
+
+    <section id="archiveView" class="panel view-archive-only" aria-labelledby="archiveTitle">
+      <div class="panel-header">
+        <h2 id="archiveTitle">Archived shows</h2>
+        <div class="panel-actions">
+          <button id="refreshArchive" type="button" class="btn ghost">Refresh archive</button>
+        </div>
+      </div>
+      <div class="grid archive-grid">
+        <div class="col-4">
+          <label for="archiveShowSelect">Archived show</label>
+          <select id="archiveShowSelect"></select>
+          <p id="archiveMeta" class="help"></p>
+        </div>
+        <div class="col-8">
+          <div id="archiveDetails" class="archive-details"></div>
+          <div id="archiveEmpty" class="help">No archived shows yet. Shows are moved here 24 hours after creation and remain available for two months.</div>
+          <div class="archive-actions row">
+            <button id="archiveExportCsv" type="button" class="btn ghost" disabled>Export CSV</button>
+            <button id="archiveExportJson" type="button" class="btn ghost" disabled>Export JSON</button>
+          </div>
+        </div>
+      </div>
     </section>
 
     <section class="panel view-lead-only" aria-labelledby="showHeaderTitle">
