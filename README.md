@@ -7,7 +7,7 @@ This project exposes the **Drone Tracker** interface as a full web application b
 - Full-featured front-end built with HTML and CSS that retains the original look-and-feel and now surfaces a LAN connection dashboard for quick status checks.
 - Express.js backend API that manages shows, entries, and configuration.
 - SQL.js storage provider (v2) implemented with `sql.js` so no native builds are required. The server creates the database file if it does not exist.
-- Configurable application settings from the in-app settings panel (unit label, SQL.js database file, webhook delivery settings).
+- Configurable application settings from the in-app settings panel (unit label, webhook delivery settings, and roster management).
 - Optional per-entry webhook export that mirrors the CSV column structure so downstream tables align perfectly with local exports.
 - CSV and JSON export for the active show.
 - Entry editor modal with validation consistent with the original workflow.
@@ -30,7 +30,7 @@ This project exposes the **Drone Tracker** interface as a full web application b
 
    The app runs on [http://10.241.211.120:3000](http://10.241.211.120:3000) out of the box. Set the `HOST` and `PORT` environment variables before launching if you need a different binding (for example `HOST=0.0.0.0 node server/index.js`).
 
-3. Open the settings panel (gear icon) to adjust the SQL.js file location or to enable the webhook exporter. By default the app uses SQLite-on-WASM and stores data in `data/monkey-tracker.sqlite`.
+3. Open the settings panel (hamburger button) to adjust the unit label, manage pilot/monkey lead/crew rosters, or to enable the webhook exporter. By default the app uses SQLite-on-WASM and stores data in `data/monkey-tracker.sqlite`.
 
 ## Configuration
 
@@ -45,7 +45,11 @@ The runtime configuration is stored in `config/app-config.json` (created automat
 
 ### SQL.js storage
 
-- **filename** – path to the SQLite database file. The directory is created if it does not exist. Shows are stored as JSON documents inside the `shows` table.
+The SQLite database file is stored at `data/monkey-tracker.sqlite`. The directory is created if it does not exist and the file is managed automatically by the server.
+
+### Roster management
+
+The settings panel maintains individual lists for pilots, IATSE monkey leads, and crew. Monkey leads start with Cleo, Bret, Leslie, and Dallas by default and can be customized to match the day's roster.
 
 ### Webhook exporter
 
