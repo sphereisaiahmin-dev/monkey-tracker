@@ -29,6 +29,7 @@ const state = {
   serverHost: '10.241.211.120',
   serverPort: 3000,
   storageLabel: 'SQL.js storage v2',
+  isCreatingShow: false,
   webhookConfig: {
     enabled: false,
     url: '',
@@ -67,6 +68,7 @@ const showNotes = el('showNotes');
 const showCrewSelect = el('showCrew');
 const leadPilotSelect = el('leadPilot');
 const monkeyLeadSelect = el('monkeyLead');
+const newShowBtn = el('newShow');
 const unitId = el('unitId');
 const planned = el('planned');
 const launched = el('launched');
@@ -166,7 +168,6 @@ function initUI(){
   leadPilotSelect.addEventListener('change', ()=> updateShowField('leadPilot', leadPilotSelect.value));
   monkeyLeadSelect.addEventListener('change', ()=> updateShowField('monkeyLead', monkeyLeadSelect.value));
 
-  const newShowBtn = el('newShow');
   const addLineBtn = el('addLine');
   if(newShowBtn){ newShowBtn.addEventListener('click', onNewShow); }
   if(addLineBtn){ addLineBtn.addEventListener('click', onAddLine); }
@@ -673,11 +674,54 @@ function collectShowHeaderValues(){
   };
 }
 
+function setShowHeaderDisabled(disabled){
+  const controls = [showDate, showTime, showLabel, showNotes, showCrewSelect, leadPilotSelect, monkeyLeadSelect];
+  controls.forEach(control =>{
+    if(!control){
+      return;
+    }
+    if(disabled){
+      control.dataset.prevDisabled = control.disabled ? 'true' : 'false';
+      control.disabled = true;
+    }else{
+      if(control.dataset.prevDisabled === 'true'){
+        control.disabled = true;
+      }else{
+        control.disabled = false;
+      }
+      delete control.dataset.prevDisabled;
+    }
+  });
+  if(!disabled){
+    const show = getCurrentShow();
+    renderCrewOptions(show?.crew || []);
+    renderPilotAssignments(show);
+  }
+}
+
+function setNewShowButtonBusy(busy){
+  if(!newShowBtn){
+    return;
+  }
+  if(!newShowBtn.dataset.originalLabel){
+    newShowBtn.dataset.originalLabel = newShowBtn.textContent || 'Add show';
+  }
+  newShowBtn.disabled = busy;
+  newShowBtn.textContent = busy ? 'Adding…' : newShowBtn.dataset.originalLabel;
+}
+
 async function onNewShow(){
   closeAllShowMenus();
+  if(state.isCreatingShow){
+    return;
+  }
+  const previousId = state.currentShowId;
+  const currentShow = getCurrentShow();
+  const initialValues = currentShow ? {} : collectShowHeaderValues();
+  state.isCreatingShow = true;
+  setShowHeaderDisabled(true);
+  setNewShowButtonBusy(true);
   try{
-    const currentShow = getCurrentShow();
-    const initialValues = currentShow ? {} : collectShowHeaderValues();
     const payload = await apiRequest('/api/shows', {method:'POST', body: JSON.stringify(initialValues)});
     upsertShow(payload);
     setCurrentShow(payload.id);
@@ -687,16 +731,31 @@ async function onNewShow(){
   }catch(err){
     console.error(err);
     toast('Failed to create show', true);
+    const fallbackId = previousId && state.shows.some(show => show.id === previousId)
+      ? previousId
+      : (state.shows[0]?.id || null);
+    setCurrentShow(fallbackId);
+  }finally{
+    state.isCreatingShow = false;
+    setShowHeaderDisabled(false);
+    setNewShowButtonBusy(false);
   }
 }
 
 async function duplicateShow(showId){
   closeAllShowMenus();
+  if(state.isCreatingShow){
+    return;
+  }
   const source = state.shows.find(show => show.id === showId);
   if(!source){
     toast('Show not found', true);
     return;
   }
+  const previousId = state.currentShowId;
+  state.isCreatingShow = true;
+  setShowHeaderDisabled(true);
+  setNewShowButtonBusy(true);
   try{
     const dupPayload = {
       date: source.date,
@@ -716,10 +775,21 @@ async function duplicateShow(showId){
   }catch(err){
     console.error(err);
     toast(err.message || 'Failed to duplicate show', true);
+    const fallbackId = previousId && state.shows.some(show => show.id === previousId)
+      ? previousId
+      : (state.shows[0]?.id || null);
+    setCurrentShow(fallbackId);
+  }finally{
+    state.isCreatingShow = false;
+    setShowHeaderDisabled(false);
+    setNewShowButtonBusy(false);
   }
 }
 
 async function updateShowField(field, value){
+  if(state.isCreatingShow){
+    return;
+  }
   const show = getCurrentShow();
   if(!show){
     return;
