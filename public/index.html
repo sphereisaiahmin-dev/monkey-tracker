@@ -10,9 +10,6 @@
   <div class="topbar" role="banner">
     <div class="toolbar">
       <div class="row">
-        <button id="roleHome" class="btn ghost" type="button">← Choose role</button>
-        <div class="grow"></div>
-        <button id="refreshShows" type="button" class="btn ghost">Refresh data</button>
         <button id="configBtn" class="btn icon-btn hamburger-btn" aria-haspopup="dialog" aria-expanded="false" aria-controls="configPanel" title="Open settings">
           <span class="hamburger-icon" aria-hidden="true">
             <span></span>
@@ -21,10 +18,13 @@
           </span>
           <span class="sr-only">Open settings</span>
         </button>
+        <button id="roleHome" class="btn ghost" type="button">← Choose role</button>
+        <div class="grow"></div>
+        <button id="refreshShows" type="button" class="btn ghost">Refresh data</button>
       </div>
       <div class="row">
+        <span id="viewBadge" class="view-badge">Lead workspace</span>
         <h1><span id="appTitle">Drone</span> Tracker</h1>
-        <span id="viewBadge" class="badge view-badge">Lead workspace</span>
       </div>
     </div>
   </div>
