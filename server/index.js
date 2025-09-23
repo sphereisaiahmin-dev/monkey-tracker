@@ -60,6 +60,18 @@ async function bootstrap(){
     res.json(config);
   }));
 
+  app.get('/api/staff', asyncHandler(async (req, res)=>{
+    const provider = getProvider();
+    const staff = await provider.getStaff();
+    res.json(staff);
+  }));
+
+  app.put('/api/staff', asyncHandler(async (req, res)=>{
+    const provider = getProvider();
+    const staff = await provider.replaceStaff(req.body || {});
+    res.json(staff);
+  }));
+
   app.get('/api/shows', asyncHandler(async (req, res)=>{
     const provider = getProvider();
     const shows = await provider.listShows();
@@ -144,7 +156,14 @@ async function bootstrap(){
 
   app.use((err, req, res, next)=>{ // eslint-disable-line no-unused-vars
     console.error(err);
-    res.status(500).json({error: 'Internal server error', detail: err.message});
+    const status = Number.isInteger(err.status) ? err.status : 500;
+    const payload = {
+      error: status === 500 ? 'Internal server error' : (err.message || 'Request failed')
+    };
+    if(status === 500 && err.message){
+      payload.detail = err.message;
+    }
+    res.status(status).json(payload);
   });
 
   function handleListenError(err){

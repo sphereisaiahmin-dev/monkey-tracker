@@ -144,6 +144,14 @@ input:disabled, select:disabled, textarea:disabled{opacity:.55; cursor:not-allow
   background-clip: padding-box;
 }
 textarea{min-height:84px; resize:vertical}
+select[multiple]{
+  min-height:160px;
+}
+.list-input{
+  min-height:140px;
+  font-size:14px;
+  line-height:1.4;
+}
 input:focus, select:focus, textarea:focus, .btn:focus-visible, .chip-input input:focus{
   border-color:var(--focus);
   box-shadow:0 0 0 3px rgba(154, 210, 255, 0.95);
