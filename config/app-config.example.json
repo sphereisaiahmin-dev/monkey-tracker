@@ -1,0 +1,16 @@
+{
+  "host": "10.241.211.120",
+  "port": 3000,
+  "unitLabel": "Drone",
+  "provider": "sql",
+  "sql": {
+    "filename": "data/monkey-tracker.sqlite"
+  },
+  "coda": {
+    "apiToken": "YOUR_CODA_TOKEN",
+    "docId": "doc_xxx",
+    "tableId": "table_xxx",
+    "showIdColumn": "Show ID",
+    "payloadColumn": "Payload"
+  }
+}
