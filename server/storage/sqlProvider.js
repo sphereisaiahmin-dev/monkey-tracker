@@ -3,6 +3,10 @@ const path = require('path');
 const initSqlJs = require('sql.js');
 const { v4: uuidv4 } = require('uuid');
 
+const DEFAULT_PILOTS = ['Alex','Nick','John Henery','James','Robert','Nazar'];
+const DEFAULT_CREW = ['Alex','Nick','John Henery','James','Robert','Nazar'];
+const DEFAULT_MONKEY_LEADS = ['Alex','Nick','John Henery','James','Robert','Nazar'];
+
 class SqlProvider {
   constructor(config = {}){
     this.config = config;
@@ -25,12 +29,22 @@ class SqlProvider {
       return;
     }
 
+    let shouldPersist = false;
     if(await this._fileExists(this.filename)){
       const content = await fs.promises.readFile(this.filename);
       this.db = new this.SQL.Database(content);
+      shouldPersist = this._ensureSchema();
     }else{
       this.db = new this.SQL.Database();
-      this._createSchema();
+      this._ensureSchema();
+      shouldPersist = true;
+    }
+
+    if(this._seedDefaultStaff()){
+      shouldPersist = true;
+    }
+
+    if(shouldPersist){
       await this._persistDatabase();
     }
   }
@@ -61,6 +75,7 @@ class SqlProvider {
       updatedAt: now,
       entries: Array.isArray(input.entries) ? input.entries : []
     });
+    await this._enforceShowLimit(show.date, show.id);
     await this._persist(show);
     return show;
   }
@@ -75,6 +90,7 @@ class SqlProvider {
       ...updates,
       updatedAt: Date.now()
     });
+    await this._enforceShowLimit(updated.date, updated.id);
     await this._persist(updated);
     return updated;
   }
@@ -94,6 +110,7 @@ class SqlProvider {
       id: entryInput.id || uuidv4(),
       ts: entryInput.ts || Date.now()
     });
+    this._assertPilotUnique(show, entry);
     const idx = show.entries.findIndex(e => e.id === entry.id);
     if(idx >= 0){
       show.entries[idx] = entry;
@@ -118,6 +135,7 @@ class SqlProvider {
       ...show.entries[idx],
       ...updates
     });
+    this._assertPilotUnique(show, entry);
     show.entries[idx] = entry;
     show.updatedAt = Date.now();
     await this._persist(show);
@@ -145,18 +163,37 @@ class SqlProvider {
     return normalized;
   }
 
+  async getStaff(){
+    return {
+      crew: this._listStaffByRole('crew'),
+      pilots: this._listStaffByRole('pilot'),
+      monkeyLeads: this._listMonkeyLeads()
+    };
+  }
+
+  async replaceStaff(staff = {}){
+    const crew = this._normalizeNameList(staff.crew || [], {sort: true});
+    const pilots = this._normalizeNameList(staff.pilots || [], {sort: true});
+    const monkeyLeads = this._normalizeNameList(staff.monkeyLeads || [], {sort: true});
+    this._replaceStaffRole('crew', crew);
+    this._replaceStaffRole('pilot', pilots);
+    this._replaceMonkeyLeads(monkeyLeads);
+    await this._persistDatabase();
+    return {crew, pilots, monkeyLeads};
+  }
+
   _normalizeShow(raw){
     const createdAt = typeof raw.createdAt === 'number' ? raw.createdAt : Number(raw.createdAt);
     const updatedAt = typeof raw.updatedAt === 'number' ? raw.updatedAt : Number(raw.updatedAt);
     return {
       id: raw.id,
-      date: raw.date || '',
-      time: raw.time || '',
-      label: raw.label || '',
-      crew: Array.isArray(raw.crew) ? raw.crew : [],
-      leadPilot: raw.leadPilot || '',
-      monkeyLead: raw.monkeyLead || '',
-      notes: raw.notes || '',
+      date: typeof raw.date === 'string' ? raw.date.trim() : '',
+      time: typeof raw.time === 'string' ? raw.time.trim() : '',
+      label: typeof raw.label === 'string' ? raw.label.trim() : '',
+      crew: Array.isArray(raw.crew) ? this._normalizeNameList(raw.crew, {sort: true}) : [],
+      leadPilot: typeof raw.leadPilot === 'string' ? raw.leadPilot.trim() : '',
+      monkeyLead: typeof raw.monkeyLead === 'string' ? raw.monkeyLead.trim() : '',
+      notes: typeof raw.notes === 'string' ? raw.notes.trim() : '',
       entries: Array.isArray(raw.entries) ? raw.entries.map(e => this._normalizeEntry(e)) : [],
       createdAt: Number.isFinite(createdAt) ? createdAt : Date.now(),
       updatedAt: Number.isFinite(updatedAt) ? updatedAt : Date.now()
@@ -168,34 +205,218 @@ class SqlProvider {
     return {
       id: raw.id || uuidv4(),
       ts: Number.isFinite(ts) ? ts : Date.now(),
-      unitId: raw.unitId || '',
-      planned: raw.planned || '',
-      launched: raw.launched || '',
-      status: raw.status || '',
-      primaryIssue: raw.primaryIssue || '',
-      subIssue: raw.subIssue || '',
-      otherDetail: raw.otherDetail || '',
-      severity: raw.severity || '',
-      rootCause: raw.rootCause || '',
-      actions: Array.isArray(raw.actions) ? raw.actions : [],
-      operator: raw.operator || '',
-      batteryId: raw.batteryId || '',
+      unitId: typeof raw.unitId === 'string' ? raw.unitId.trim() : '',
+      planned: typeof raw.planned === 'string' ? raw.planned.trim() : '',
+      launched: typeof raw.launched === 'string' ? raw.launched.trim() : '',
+      status: typeof raw.status === 'string' ? raw.status.trim() : '',
+      primaryIssue: typeof raw.primaryIssue === 'string' ? raw.primaryIssue.trim() : '',
+      subIssue: typeof raw.subIssue === 'string' ? raw.subIssue.trim() : '',
+      otherDetail: typeof raw.otherDetail === 'string' ? raw.otherDetail.trim() : '',
+      severity: typeof raw.severity === 'string' ? raw.severity.trim() : '',
+      rootCause: typeof raw.rootCause === 'string' ? raw.rootCause.trim() : '',
+      actions: Array.isArray(raw.actions) ? this._normalizeNameList(raw.actions) : [],
+      operator: typeof raw.operator === 'string' ? raw.operator.trim() : '',
+      batteryId: typeof raw.batteryId === 'string' ? raw.batteryId.trim() : '',
       delaySec: raw.delaySec === null || raw.delaySec === undefined || raw.delaySec === ''
         ? null
         : Number(raw.delaySec),
-      commandRx: raw.commandRx || '',
-      notes: raw.notes || ''
+      commandRx: typeof raw.commandRx === 'string' ? raw.commandRx.trim() : '',
+      notes: typeof raw.notes === 'string' ? raw.notes.trim() : ''
     };
   }
 
-  _createSchema(){
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS shows (
-        id TEXT PRIMARY KEY,
-        data TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      )
-    `);
+  async _enforceShowLimit(date, excludeId){
+    const trimmedDate = typeof date === 'string' ? date.trim() : '';
+    if(!trimmedDate){
+      return;
+    }
+    const shows = await this.listShows();
+    const matching = shows.filter(show => {
+      if(!show || typeof show !== 'object'){
+        return false;
+      }
+      const showDate = typeof show.date === 'string' ? show.date.trim() : '';
+      if(showDate !== trimmedDate){
+        return false;
+      }
+      return show.id !== excludeId;
+    });
+    if(matching.length >= 5){
+      const err = new Error('Daily show limit reached. Maximum of 5 shows per date.');
+      err.status = 400;
+      throw err;
+    }
+  }
+
+  _assertPilotUnique(show, entry){
+    if(!show){
+      return;
+    }
+    const normalized = (entry.operator || '').trim().toLowerCase();
+    if(!normalized){
+      return;
+    }
+    const hasDuplicate = (show.entries || []).some(existing => {
+      if(!existing){
+        return false;
+      }
+      if(existing.id === entry.id){
+        return false;
+      }
+      const existingPilot = (existing.operator || '').trim().toLowerCase();
+      return existingPilot === normalized;
+    });
+    if(hasDuplicate){
+      const err = new Error('Pilot already has an entry for this show.');
+      err.status = 400;
+      throw err;
+    }
+  }
+
+  _ensureSchema(){
+    let mutated = false;
+    if(!this._tableExists('shows')){
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS shows (
+          id TEXT PRIMARY KEY,
+          data TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+      `);
+      mutated = true;
+    }else{
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS shows (
+          id TEXT PRIMARY KEY,
+          data TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+      `);
+    }
+
+    if(!this._tableExists('staff')){
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS staff (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          role TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        )
+      `);
+      mutated = true;
+    }else{
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS staff (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          role TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        )
+      `);
+    }
+
+    if(!this._tableExists('monkey_leads')){
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS monkey_leads (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        )
+      `);
+      mutated = true;
+    }else{
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS monkey_leads (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        )
+      `);
+    }
+
+    return mutated;
+  }
+
+  _seedDefaultStaff(){
+    let mutated = false;
+    if(this._listStaffByRole('pilot').length === 0){
+      this._replaceStaffRole('pilot', this._normalizeNameList(DEFAULT_PILOTS, {sort: true}));
+      mutated = true;
+    }
+    if(this._listStaffByRole('crew').length === 0){
+      this._replaceStaffRole('crew', this._normalizeNameList(DEFAULT_CREW, {sort: true}));
+      mutated = true;
+    }
+    if(this._listMonkeyLeads().length === 0){
+      this._replaceMonkeyLeads(this._normalizeNameList(DEFAULT_MONKEY_LEADS, {sort: true}));
+      mutated = true;
+    }
+    return mutated;
+  }
+
+  _listStaffByRole(role){
+    const rows = this._select('SELECT name FROM staff WHERE role = ? ORDER BY name COLLATE NOCASE', [role]);
+    return rows.map(row => row.name);
+  }
+
+  _listMonkeyLeads(){
+    if(!this._tableExists('monkey_leads')){
+      return [];
+    }
+    const rows = this._select('SELECT name FROM monkey_leads ORDER BY name COLLATE NOCASE');
+    return rows.map(row => row.name);
+  }
+
+  _replaceStaffRole(role, names){
+    this._run('DELETE FROM staff WHERE role = ?', [role]);
+    if(!Array.isArray(names) || names.length === 0){
+      return;
+    }
+    const timestamp = new Date().toISOString();
+    names.forEach(name =>{
+      this._run('INSERT INTO staff (id, name, role, created_at) VALUES (?, ?, ?, ?)', [uuidv4(), name, role, timestamp]);
+    });
+  }
+
+  _replaceMonkeyLeads(names){
+    if(!this._tableExists('monkey_leads')){
+      return;
+    }
+    this._run('DELETE FROM monkey_leads');
+    if(!Array.isArray(names) || names.length === 0){
+      return;
+    }
+    const timestamp = new Date().toISOString();
+    names.forEach(name =>{
+      this._run('INSERT INTO monkey_leads (id, name, created_at) VALUES (?, ?, ?)', [uuidv4(), name, timestamp]);
+    });
+  }
+
+  _normalizeNameList(list = [], options = {}){
+    const {sort = false} = options;
+    const seen = new Set();
+    const result = [];
+    list.forEach(name =>{
+      const value = typeof name === 'string' ? name.trim() : '';
+      if(!value){
+        return;
+      }
+      const key = value.toLowerCase();
+      if(seen.has(key)){
+        return;
+      }
+      seen.add(key);
+      result.push(value);
+    });
+    if(sort){
+      result.sort((a,b)=> a.localeCompare(b, undefined, {sensitivity: 'base'}));
+    }
+    return result;
+  }
+
+  _tableExists(name){
+    const row = this._selectOne("SELECT name FROM sqlite_master WHERE type='table' AND name = ?", [name]);
+    return Boolean(row);
   }
 
   async _persist(show){

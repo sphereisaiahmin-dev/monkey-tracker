@@ -12,7 +12,6 @@ const ISSUE_MAP = {
 };
 const PRIMARY_ISSUES = Object.keys(ISSUE_MAP);
 const ACTIONS = ['Reboot','Swap battery','Swap drone','Retry launch','Abort segment','Logged only'];
-const DEFAULT_CREW = ['Alex','Nick','John Henery','James','Robert','Nazar'];
 const STATUS = ['Completed','No-launch','Abort'];
 const EXPORT_COLUMNS = [
   'showId','showDate','showTime','showLabel','crew','leadPilot','monkeyLead','showNotes',
@@ -42,8 +41,22 @@ const state = {
     method: 'POST',
     hasSecret: false,
     headerCount: 0
+  },
+  staff: {
+    crew: [],
+    pilots: [],
+    monkeyLeads: []
   }
 };
+
+const syncState = {
+  channel: null,
+  id: (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
+    ? crypto.randomUUID()
+    : `sync-${Date.now()}-${Math.random().toString(16).slice(2)}`
+};
+
+const SYNC_CHANNEL_NAME = 'monkey-tracker-sync';
 
 const appTitle = el('appTitle');
 const unitLabelEl = el('unitLabel');
@@ -51,7 +64,7 @@ const showDate = el('showDate');
 const showTime = el('showTime');
 const showLabel = el('showLabel');
 const showNotes = el('showNotes');
-const crewInput = el('crewInput');
+const showCrewSelect = el('showCrew');
 const leadPilotSelect = el('leadPilot');
 const monkeyLeadSelect = el('monkeyLead');
 const unitId = el('unitId');
@@ -104,6 +117,9 @@ const providerBadge = el('providerBadge');
 const webhookBadge = el('webhookBadge');
 const refreshShowsBtn = el('refreshShows');
 const lanAddressEl = el('lanAddress');
+const pilotListInput = el('pilotList');
+const crewListInput = el('crewList');
+const monkeyLeadListInput = el('monkeyLeadList');
 
 init().catch(err=>{
   console.error(err);
@@ -113,8 +129,10 @@ init().catch(err=>{
 async function init(){
   await loadConfig();
   updateConnectionIndicator('loading');
+  await loadStaff();
   await loadShows();
   initUI();
+  setupSyncChannel();
   populateUnitOptions();
   populateIssues();
   renderActionsChips(actionsChips, []);
@@ -140,14 +158,18 @@ function initUI(){
   showTime.addEventListener('change', ()=> updateShowField('time', showTime.value));
   showLabel.addEventListener('input', debounce(()=> updateShowField('label', showLabel.value.trim()), 400));
   showNotes.addEventListener('input', debounce(()=> updateShowField('notes', showNotes.value.trim()), 400));
+  if(showCrewSelect){
+    showCrewSelect.addEventListener('change', ()=>{
+      const selected = Array.from(showCrewSelect.selectedOptions).map(opt=> opt.value).filter(Boolean);
+      updateShowField('crew', selected);
+    });
+  }
   leadPilotSelect.addEventListener('change', ()=> updateShowField('leadPilot', leadPilotSelect.value));
   monkeyLeadSelect.addEventListener('change', ()=> updateShowField('monkeyLead', monkeyLeadSelect.value));
 
   const newShowBtn = el('newShow');
-  const dupShowBtn = el('dupShow');
   const addLineBtn = el('addLine');
   if(newShowBtn){ newShowBtn.addEventListener('click', onNewShow); }
-  if(dupShowBtn){ dupShowBtn.addEventListener('click', onDuplicateShow); }
   if(addLineBtn){ addLineBtn.addEventListener('click', onAddLine); }
   if(leadExportCsvBtn){ leadExportCsvBtn.addEventListener('click', onExportCsv); }
   if(leadExportJsonBtn){ leadExportJsonBtn.addEventListener('click', onExportJson); }
@@ -180,6 +202,7 @@ function initUI(){
     if(e.key === 'Escape'){
       toggleConfig(false);
       closeEditModal();
+      closeAllMenus();
     }
   });
 
@@ -215,14 +238,6 @@ function initUI(){
     refreshShowsBtn.addEventListener('click', onRefreshShows);
   }
 
-  window.addEventListener('resize', adjustContainerBottomPadding);
-  if('ResizeObserver' in window){
-    const ro = new ResizeObserver(adjustContainerBottomPadding);
-    const footer = document.querySelector('.sticky-footer');
-    if(footer){
-      ro.observe(footer);
-    }
-  }
 }
 
 async function loadConfig(){
@@ -260,6 +275,30 @@ async function loadConfig(){
   setWebhookBadge(state.webhookStatus);
   syncWebhookFields();
   updateWebhookPreview();
+}
+
+async function loadStaff(){
+  try{
+    const data = await apiRequest('/api/staff');
+    const crew = normalizeNameList(Array.isArray(data.crew) ? data.crew : [], {sort: true});
+    const pilots = normalizeNameList(Array.isArray(data.pilots) ? data.pilots : [], {sort: true});
+    const monkeyLeads = normalizeNameList(Array.isArray(data.monkeyLeads) ? data.monkeyLeads : [], {sort: true});
+    state.staff = {crew, pilots, monkeyLeads};
+  }catch(err){
+    console.error('Failed to load staff', err);
+    if(!state.staff){
+      state.staff = {crew: [], pilots: [], monkeyLeads: []};
+    }else{
+      state.staff.crew = [];
+      state.staff.pilots = [];
+      state.staff.monkeyLeads = [];
+    }
+    toast('Failed to load staff directory', true);
+  }
+  populateStaffSettings();
+  renderOperatorOptions();
+  renderCrewOptions(getCurrentShow()?.crew || []);
+  renderPilotAssignments(getCurrentShow());
 }
 
 async function loadShows(){
@@ -308,6 +347,130 @@ async function onRefreshShows(){
       refreshShowsBtn.disabled = false;
       refreshShowsBtn.textContent = originalLabel || 'Refresh data';
     }
+  }
+}
+
+function setupSyncChannel(){
+  if(typeof BroadcastChannel !== 'function'){
+    return;
+  }
+  if(syncState.channel){
+    return;
+  }
+  try{
+    syncState.channel = new BroadcastChannel(SYNC_CHANNEL_NAME);
+    syncState.channel.addEventListener('message', handleSyncMessage);
+    window.addEventListener('beforeunload', closeSyncChannel, {once: true});
+    window.addEventListener('pagehide', closeSyncChannel, {once: true});
+  }catch(err){
+    console.warn('Failed to initialize sync channel', err);
+    syncState.channel = null;
+  }
+}
+
+function closeSyncChannel(){
+  if(!syncState.channel){
+    return;
+  }
+  try{
+    syncState.channel.close();
+  }catch(err){
+    console.warn('Failed to close sync channel', err);
+  }finally{
+    syncState.channel = null;
+  }
+}
+
+function broadcastMessage(type, detail = {}){
+  if(!syncState.channel){
+    return;
+  }
+  try{
+    syncState.channel.postMessage({
+      source: syncState.id,
+      type,
+      detail: detail || {}
+    });
+  }catch(err){
+    console.warn('Failed to broadcast sync message', err);
+  }
+}
+
+function notifyShowsChanged(detail = {}){
+  broadcastMessage('shows:changed', detail);
+}
+
+function notifyStaffChanged(){
+  broadcastMessage('staff:changed');
+}
+
+function notifyConfigChanged(detail = {}){
+  broadcastMessage('config:changed', detail);
+}
+
+async function handleSyncMessage(event){
+  const data = event?.data;
+  if(!data || typeof data !== 'object' || data.source === syncState.id){
+    return;
+  }
+  try{
+    switch(data.type){
+      case 'shows:changed':
+        await refreshShowsFromSync(data.detail);
+        break;
+      case 'staff:changed':
+        await refreshStaffFromSync();
+        break;
+      case 'config:changed':
+        await refreshConfigFromSync(data.detail);
+        break;
+      default:
+        break;
+    }
+  }catch(err){
+    console.error('Sync message handling failed', err);
+  }
+}
+
+async function refreshShowsFromSync(detail = {}){
+  const previousId = state.currentShowId;
+  try{
+    await loadShows();
+  }catch(err){
+    console.error('Failed to sync shows', err);
+    return;
+  }
+  let targetId = null;
+  const preferredId = detail && typeof detail === 'object' ? detail.showId : null;
+  const hasPrevious = previousId && state.shows.some(show => show.id === previousId);
+  const hasPreferred = preferredId && state.shows.some(show => show.id === preferredId);
+  if(hasPrevious){
+    targetId = previousId;
+  }else if(hasPreferred){
+    targetId = preferredId;
+  }else{
+    targetId = state.shows[0]?.id || null;
+  }
+  setCurrentShow(targetId, {skipPilotSync: false});
+}
+
+async function refreshStaffFromSync(){
+  try{
+    await loadStaff();
+  }catch(err){
+    console.error('Failed to sync staff roster', err);
+  }
+}
+
+async function refreshConfigFromSync(){
+  try{
+    await loadConfig();
+    populateUnitOptions();
+    updateConnectionIndicator('loading');
+    await loadShows();
+    setCurrentShow(state.currentShowId || null);
+  }catch(err){
+    console.error('Failed to sync configuration', err);
   }
 }
 
@@ -408,24 +571,16 @@ function fillHeader(show){
     showTime.value = '';
     showLabel.value = '';
     showNotes.value = '';
-    initCrewChipInput(crewInput, [], ()=>{});
-    leadPilotSelect.innerHTML = '<option value="">Select</option>';
-    monkeyLeadSelect.innerHTML = '<option value="">Select</option>';
+    renderCrewOptions([]);
+    renderPilotAssignments(null);
     return;
   }
   showDate.value = show.date || '';
   showTime.value = show.time || '';
   showLabel.value = show.label || '';
   showNotes.value = show.notes || '';
-  initCrewChipInput(crewInput, show.crew || [], names=>{
-    updateShowField('crew', names);
-    renderOperatorOptions();
-  });
-  renderOperatorOptions();
-  const crewOptions = [''].concat(show.crew || [], DEFAULT_CREW);
-  const uniqueOptions = [...new Set(crewOptions.filter(Boolean))];
-  leadPilotSelect.innerHTML = '<option value="">Select</option>' + uniqueOptions.map(name=>`<option ${show.leadPilot===name?'selected':''}>${escapeHtml(name)}</option>`).join('');
-  monkeyLeadSelect.innerHTML = '<option value="">Select</option>' + uniqueOptions.map(name=>`<option ${show.monkeyLead===name?'selected':''}>${escapeHtml(name)}</option>`).join('');
+  renderCrewOptions(show.crew || []);
+  renderPilotAssignments(show);
 }
 
 function populateUnitOptions(){
@@ -505,6 +660,7 @@ async function onNewShow(){
     const payload = await apiRequest('/api/shows', {method:'POST', body: JSON.stringify({})});
     upsertShow(payload);
     setCurrentShow(payload.id);
+    notifyShowsChanged({showId: payload.id});
     clearEntryForm();
     toast('New show created');
   }catch(err){
@@ -513,30 +669,31 @@ async function onNewShow(){
   }
 }
 
-async function onDuplicateShow(){
-  const current = getCurrentShow();
-  if(!current){
-    await onNewShow();
+async function duplicateShow(sourceShowId){
+  const source = getShowById(sourceShowId);
+  if(!source){
+    toast('Show not found', true);
     return;
   }
   try{
     const dupPayload = {
-      date: current.date,
-      time: current.time,
-      label: current.label,
-      crew: [...(current.crew||[])],
-      leadPilot: current.leadPilot || '',
-      monkeyLead: current.monkeyLead || '',
-      notes: current.notes || ''
+      date: source.date,
+      time: source.time,
+      label: source.label,
+      crew: Array.isArray(source.crew) ? [...source.crew] : [],
+      leadPilot: source.leadPilot || '',
+      monkeyLead: source.monkeyLead || '',
+      notes: source.notes || ''
     };
     const payload = await apiRequest('/api/shows', {method:'POST', body: JSON.stringify(dupPayload)});
     upsertShow(payload);
     setCurrentShow(payload.id);
+    notifyShowsChanged({showId: payload.id});
     clearEntryForm();
     toast('Show duplicated');
   }catch(err){
     console.error(err);
-    toast('Failed to duplicate show', true);
+    toast(err.message || 'Failed to duplicate show', true);
   }
 }
 
@@ -549,9 +706,11 @@ async function updateShowField(field, value){
     const updated = await apiRequest(`/api/shows/${show.id}`, {method:'PUT', body: JSON.stringify({[field]: value})});
     upsertShow(updated);
     setCurrentShow(updated.id);
+    notifyShowsChanged({showId: updated.id});
   }catch(err){
     console.error(err);
-    toast('Failed to update show', true);
+    toast(err.message || 'Failed to update show', true);
+    setCurrentShow(show.id);
   }
 }
 
@@ -582,6 +741,7 @@ async function onAddLine(){
     if(!severity.value){ showError('errSeverity'); ok=false; }
     if(primaryIssue.value === 'Other' && !otherDetail.value.trim()){ showError('errOther'); ok=false; }
   }
+  if(!operator.value){ showError('errOperator'); ok=false; }
   if(delaySec.value){
     const v = Number(delaySec.value);
     if(!Number.isFinite(v) || v < 0){ showError('errDelay'); ok=false; }
@@ -611,11 +771,12 @@ async function onAddLine(){
     const updatedShow = await apiRequest(`/api/shows/${show.id}`, {method:'GET'});
     upsertShow(updatedShow);
     setCurrentShow(updatedShow.id);
+    notifyShowsChanged({showId: updatedShow.id});
     clearEntryForm();
     toast('Line added');
   }catch(err){
     console.error(err);
-    toast('Failed to add entry', true);
+    toast(err.message || 'Failed to add entry', true);
   }
 }
 
@@ -647,14 +808,55 @@ function renderGroups(){
     group.className = 'group';
     group.open = isOpen;
     const summary = document.createElement('summary');
-    summary.innerHTML = `<div class="group-title">${groupTitle(show)}</div><div class="badge">${show.entries?.length || 0} entries</div>`;
+    summary.innerHTML = `
+      <div class="group-summary">
+        <div class="group-summary-main">${groupTitle(show)}</div>
+        <div class="group-summary-actions">
+          <span class="badge">${show.entries?.length || 0} entries</span>
+          <div class="menu" data-menu>
+            <button class="menu-btn" type="button" aria-haspopup="true" aria-expanded="false" title="Show actions">⋯</button>
+            <div class="menu-list" role="menu">
+              <button class="menu-item" type="button" role="menuitem" data-duplicate>Duplicate show</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
     summary.addEventListener('click', ()=>{
+      closeAllMenus();
       setTimeout(()=>{
         if(group.open){
           setCurrentShow(show.id, {skipRender: true});
         }
       }, 0);
     });
+    const showMenu = summary.querySelector('[data-menu]');
+    if(showMenu){
+      const menuBtn = showMenu.querySelector('.menu-btn');
+      const duplicateBtn = showMenu.querySelector('[data-duplicate]');
+      menuBtn.addEventListener('click', e=>{
+        e.preventDefault();
+        e.stopPropagation();
+        const open = showMenu.hasAttribute('open');
+        closeAllMenus();
+        if(!open){
+          showMenu.setAttribute('open', '');
+          menuBtn.setAttribute('aria-expanded', 'true');
+          document.addEventListener('click', closeAllMenus, {once: true});
+        }else{
+          menuBtn.setAttribute('aria-expanded', 'false');
+        }
+      });
+      if(duplicateBtn){
+        duplicateBtn.addEventListener('click', async e=>{
+          e.preventDefault();
+          e.stopPropagation();
+          showMenu.removeAttribute('open');
+          menuBtn.setAttribute('aria-expanded', 'false');
+          await duplicateShow(show.id);
+        });
+      }
+    }
     const metricsDiv = document.createElement('div');
     const metrics = computeMetrics(show);
     metricsDiv.className = 'metrics';
@@ -739,10 +941,12 @@ function renderRow(show, entry){
   });
   qs('[data-edit]', row).addEventListener('click', ()=>{
     menu.removeAttribute('open');
+    btn.setAttribute('aria-expanded', 'false');
     openEditModal(show.id, entry.id);
   });
   qs('[data-delete]', row).addEventListener('click', async ()=>{
     menu.removeAttribute('open');
+    btn.setAttribute('aria-expanded', 'false');
     if(confirm('Delete this entry?')){
       await deleteEntry(show.id, entry.id);
     }
@@ -756,6 +960,7 @@ async function deleteEntry(showId, entryId){
     const updatedShow = await apiRequest(`/api/shows/${showId}`, {method:'GET'});
     upsertShow(updatedShow);
     setCurrentShow(updatedShow.id);
+    notifyShowsChanged({showId: updatedShow.id});
     toast('Entry deleted');
   }catch(err){
     console.error(err);
@@ -764,7 +969,13 @@ async function deleteEntry(showId, entryId){
 }
 
 function closeAllMenus(){
-  qsa('[data-menu]').forEach(m=>m.removeAttribute('open'));
+  qsa('[data-menu]').forEach(menu=>{
+    menu.removeAttribute('open');
+    const btn = qs('.menu-btn', menu);
+    if(btn){
+      btn.setAttribute('aria-expanded', 'false');
+    }
+  });
 }
 
 function computeMetrics(show){
@@ -836,6 +1047,8 @@ async function saveEditEntry(){
     if(!prim || !sev){ toast('Issue and Severity required when not Completed', true); return; }
     if(prim === 'Other' && !other){ toast('Other detail required', true); return; }
   }
+  const operatorValue = get('edit_operator').value.trim();
+  if(!operatorValue){ toast('Operator required', true); return; }
   const entryUpdate = {
     unitId: get('edit_unitId').value,
     planned: get('edit_planned').value,
@@ -847,7 +1060,7 @@ async function saveEditEntry(){
     severity: status === 'Completed' ? '' : sev,
     rootCause: status === 'Completed' ? '' : get('edit_rootCause').value,
     actions: status === 'Completed' ? [] : getSelectedActions(qs('#edit_actionsChips', form)),
-    operator: get('edit_operator').value || '',
+    operator: operatorValue,
     batteryId: get('edit_batteryId').value.trim(),
     delaySec: get('edit_delaySec').value ? Number(get('edit_delaySec').value) : null,
     commandRx: get('edit_commandRx').value || '',
@@ -858,11 +1071,12 @@ async function saveEditEntry(){
     const updatedShow = await apiRequest(`/api/shows/${show.id}`, {method:'GET'});
     upsertShow(updatedShow);
     setCurrentShow(updatedShow.id);
+    notifyShowsChanged({showId: updatedShow.id});
     closeEditModal();
     toast('Entry updated');
   }catch(err){
     console.error(err);
-    toast('Failed to update entry', true);
+    toast(err.message || 'Failed to update entry', true);
   }
 }
 
@@ -940,8 +1154,16 @@ function buildEntryFieldsClone(entry, show){
   fields.push(actionsContainer);
 
   const operatorSelect = document.createElement('select');
-  const crew = [...new Set([...(show?.crew || []), ...(entry.operator ? [entry.operator] : []), ...DEFAULT_CREW])];
-  operatorSelect.innerHTML = '<option value="">Select</option>' + crew.map(name=>`<option ${entry.operator===name?'selected':''}>${escapeHtml(name)}</option>`).join('');
+  const pilots = getPilotNames([entry.operator, show?.leadPilot, show?.monkeyLead]);
+  if(pilots.length){
+    operatorSelect.innerHTML = '<option value="">Select</option>' + pilots.map(name=>`<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('');
+    operatorSelect.disabled = false;
+    const match = pilots.find(name => name.toLowerCase() === (entry.operator || '').toLowerCase());
+    operatorSelect.value = match || '';
+  }else{
+    operatorSelect.innerHTML = '<option value="">Add pilots in settings</option>';
+    operatorSelect.disabled = true;
+  }
   fields.push(wrap(createLabelWrap('edit_operator', 'Operator', operatorSelect)));
 
   const battery = document.createElement('input');
@@ -1000,10 +1222,29 @@ function pillGet(formRoot){
 }
 
 function renderOperatorOptions(){
-  const show = getCurrentShow();
-  const names = new Set([...(show?.crew || []), ...DEFAULT_CREW]);
+  if(!operator){
+    return;
+  }
   const current = operator.value;
-  operator.innerHTML = '<option value="">Select</option>' + Array.from(names).map(name=>`<option ${current===name?'selected':''}>${escapeHtml(name)}</option>`).join('');
+  const show = getCurrentShow();
+  const names = getCrewNames([show?.crew || [], show?.leadPilot, show?.monkeyLead, current]);
+  if(!names.length){
+    operator.innerHTML = '<option value="">Add crew or monkey leads in settings</option>';
+    operator.value = '';
+    operator.disabled = true;
+    return;
+  }
+  operator.disabled = false;
+  const options = [''].concat(names).map(name=>{
+    if(!name){
+      return '<option value="">Select</option>';
+    }
+    return `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`;
+  }).join('');
+  operator.innerHTML = options;
+  const currentLower = current ? current.toLowerCase() : '';
+  const match = names.find(name => name.toLowerCase() === currentLower);
+  operator.value = match || '';
 }
 
 function setView(view){
@@ -1031,7 +1272,6 @@ function setView(view){
   }else{
     updatePilotSummary();
   }
-  adjustContainerBottomPadding();
 }
 
 function toggleConfig(open){
@@ -1044,6 +1284,11 @@ function toggleConfig(open){
 
 async function onConfigSubmit(event){
   event.preventDefault();
+  const staffPayload = {
+    pilots: parseStaffTextarea(pilotListInput ? pilotListInput.value : ''),
+    crew: parseStaffTextarea(crewListInput ? crewListInput.value : ''),
+    monkeyLeads: parseStaffTextarea(monkeyLeadListInput ? monkeyLeadListInput.value : '')
+  };
   const payload = {
     unitLabel: unitLabelSelect.value,
     sql: {
@@ -1057,6 +1302,24 @@ async function onConfigSubmit(event){
       headers: parseHeadersText(webhookHeaders ? webhookHeaders.value : '')
     }
   };
+  try{
+    const savedStaff = await apiRequest('/api/staff', {method: 'PUT', body: JSON.stringify(staffPayload)});
+    state.staff = {
+      pilots: normalizeNameList(savedStaff?.pilots || [], {sort: true}),
+      crew: normalizeNameList(savedStaff?.crew || [], {sort: true}),
+      monkeyLeads: normalizeNameList(savedStaff?.monkeyLeads || [], {sort: true})
+    };
+    populateStaffSettings();
+    renderCrewOptions(getCurrentShow()?.crew || []);
+    renderPilotAssignments(getCurrentShow());
+    renderOperatorOptions();
+    notifyStaffChanged();
+  }catch(err){
+    console.error(err);
+    configMessage.textContent = err.message || 'Failed to save staff';
+    toast(err.message || 'Failed to save staff', true);
+    return;
+  }
   try{
     const updated = await apiRequest('/api/config', {method:'PUT', body: JSON.stringify(payload)});
     state.config = updated;
@@ -1090,6 +1353,7 @@ async function onConfigSubmit(event){
     updateConnectionIndicator('loading');
     await loadShows();
     setCurrentShow(state.currentShowId || null);
+    notifyConfigChanged({unitLabel: state.unitLabel});
     configMessage.textContent = 'Settings saved. Storage restarted.';
     toggleConfig(false);
     toast('Settings updated');
@@ -1386,14 +1650,6 @@ function csvEscape(value){
   return str;
 }
 
-function adjustContainerBottomPadding(){
-  const container = document.querySelector('.container');
-  const footer = document.querySelector('.sticky-footer');
-  if(!container || !footer){ return; }
-  const footerHeight = Math.ceil(footer.getBoundingClientRect().height);
-  container.style.paddingBottom = `${footerHeight + 12}px`;
-}
-
 function getDefaultUnits(){
   if(state.unitLabel === 'Monkey'){
     return Array.from({length: 12}, (_, i)=> String(i+1));
@@ -1456,42 +1712,126 @@ async function apiRequest(url, options){
   return data;
 }
 
-function initCrewChipInput(container, initial, onChange){
-  container.innerHTML = '';
-  const input = document.createElement('input');
-  input.type = 'text';
-  input.placeholder = 'Type name and press Enter';
-  const names = [...initial];
-  const renderChip = name =>{
-    const chip = document.createElement('span');
-    chip.className = 'chip';
-    chip.innerHTML = `<span>${escapeHtml(name)}</span><button class="x" aria-label="Remove">×</button>`;
-    qs('.x', chip).addEventListener('click', e=>{
-      e.stopPropagation();
-      const idx = names.indexOf(name);
-      if(idx >=0){
-        names.splice(idx,1);
-        chip.remove();
-        onChange([...names]);
-      }
-    });
-    return chip;
-  };
-  names.forEach(name=> container.appendChild(renderChip(name)));
-  container.appendChild(input);
-  input.addEventListener('keydown', e=>{
-    if(e.key === 'Enter' || e.key === ','){
-      e.preventDefault();
-      const value = input.value.trim();
-      if(value && !names.includes(value)){
-        names.push(value);
-        container.insertBefore(renderChip(value), input);
-        onChange([...names]);
-      }
-      input.value = '';
-    }
+function populateStaffSettings(){
+  if(pilotListInput){
+    pilotListInput.value = (state.staff?.pilots || []).join('\n');
+  }
+  if(crewListInput){
+    crewListInput.value = (state.staff?.crew || []).join('\n');
+  }
+  if(monkeyLeadListInput){
+    monkeyLeadListInput.value = (state.staff?.monkeyLeads || []).join('\n');
+  }
+}
+
+function parseStaffTextarea(value){
+  if(typeof value !== 'string'){
+    return [];
+  }
+  const lines = value.split(/\r?\n/);
+  return normalizeNameList(lines, {sort: true});
+}
+
+function getPilotNames(additional = []){
+  return normalizeNameList([state.staff?.pilots || [], additional], {sort: true});
+}
+
+function getMonkeyLeadNames(additional = []){
+  return normalizeNameList([state.staff?.monkeyLeads || [], additional], {sort: true});
+}
+
+function getCrewNames(additional = []){
+  return normalizeNameList([state.staff?.crew || [], state.staff?.monkeyLeads || [], additional], {sort: true});
+}
+
+function renderCrewOptions(selected = []){
+  if(!showCrewSelect){
+    return;
+  }
+  const selectedList = normalizeNameList(selected);
+  const crewNames = getCrewNames([selectedList]);
+  if(!crewNames.length){
+    showCrewSelect.innerHTML = '<option value="">Add crew or monkey leads in settings</option>';
+    showCrewSelect.disabled = true;
+    return;
+  }
+  showCrewSelect.disabled = false;
+  showCrewSelect.innerHTML = crewNames.map(name=>`<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('');
+  const selectedSet = new Set(selectedList.map(name => name.toLowerCase()));
+  Array.from(showCrewSelect.options).forEach(option =>{
+    option.selected = selectedSet.has(option.value.toLowerCase());
   });
-  container.addEventListener('click', ()=> input.focus());
+}
+
+function renderPilotAssignments(show){
+  if(!leadPilotSelect || !monkeyLeadSelect){
+    return;
+  }
+  const pilotNames = getPilotNames([show?.leadPilot]);
+  if(!pilotNames.length){
+    leadPilotSelect.innerHTML = '<option value="">Add pilots in settings</option>';
+    leadPilotSelect.disabled = true;
+    leadPilotSelect.value = '';
+  }else{
+    const pilotOptions = [''].concat(pilotNames).map(name=>{
+      if(!name){
+        return '<option value="">Select</option>';
+      }
+      return `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`;
+    }).join('');
+    leadPilotSelect.innerHTML = pilotOptions;
+    leadPilotSelect.disabled = false;
+    const leadValue = show?.leadPilot || '';
+    const leadMatch = pilotNames.find(name => name.toLowerCase() === leadValue.toLowerCase());
+    leadPilotSelect.value = leadMatch || '';
+  }
+
+  const monkeyNames = getMonkeyLeadNames([show?.monkeyLead]);
+  if(!monkeyNames.length){
+    monkeyLeadSelect.innerHTML = '<option value="">Add monkey leads in settings</option>';
+    monkeyLeadSelect.disabled = true;
+    monkeyLeadSelect.value = '';
+  }else{
+    const monkeyOptions = [''].concat(monkeyNames).map(name=>{
+      if(!name){
+        return '<option value="">Select</option>';
+      }
+      return `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`;
+    }).join('');
+    monkeyLeadSelect.innerHTML = monkeyOptions;
+    monkeyLeadSelect.disabled = false;
+    const monkeyValue = show?.monkeyLead || '';
+    const monkeyMatch = monkeyNames.find(name => name.toLowerCase() === monkeyValue.toLowerCase());
+    monkeyLeadSelect.value = monkeyMatch || '';
+  }
+}
+
+function normalizeNameList(list = [], options = {}){
+  const {sort = false} = options;
+  const seen = new Set();
+  const result = [];
+  const queue = Array.isArray(list) ? list.slice() : [list];
+  while(queue.length){
+    const value = queue.shift();
+    if(Array.isArray(value)){
+      queue.push(...value);
+      continue;
+    }
+    const name = typeof value === 'string' ? value.trim() : '';
+    if(!name){
+      continue;
+    }
+    const key = name.toLowerCase();
+    if(seen.has(key)){
+      continue;
+    }
+    seen.add(key);
+    result.push(name);
+  }
+  if(sort){
+    result.sort((a,b)=> a.localeCompare(b, undefined, {sensitivity: 'base'}));
+  }
+  return result;
 }
 
 function getShowById(id){
