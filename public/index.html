@@ -2,96 +2,126 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Drone Tracker</title>
+  <title>Flight Log Form</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
-  <div class="topbar" role="banner">
-    <div class="toolbar">
-      <div class="row">
-        <button id="configBtn" class="btn icon-btn hamburger-btn" aria-haspopup="dialog" aria-expanded="false" aria-controls="configPanel" title="Open settings">
-          <span class="hamburger-icon" aria-hidden="true">
-            <span></span>
-            <span></span>
-            <span></span>
-          </span>
-          <span class="sr-only">Open settings</span>
-        </button>
-        <button id="roleHome" class="btn ghost" type="button">← Choose role</button>
-        <div class="grow"></div>
-        <button id="refreshShows" type="button" class="btn ghost">Refresh data</button>
+  <div id="appShell" class="app-shell">
+    <aside id="configPanel" class="config" role="dialog" aria-modal="true" aria-labelledby="configTitle">
+      <div class="toolbar config-header">
+        <h2 id="configTitle">Workspace menu</h2>
+        <button id="closeConfig" class="btn icon-btn" title="Close settings">✖️</button>
       </div>
-      <div class="row">
-        <span id="viewBadge" class="view-badge">Lead workspace</span>
-        <h1><span id="appTitle">Drone</span> Tracker</h1>
-      </div>
-    </div>
-  </div>
-
-  <div id="configPanel" class="config" role="dialog" aria-modal="true" aria-labelledby="configTitle">
-    <div class="toolbar">
-      <h2 id="configTitle">Application settings</h2>
-      <button id="closeConfig" class="btn icon-btn" title="Close settings">✖️</button>
-    </div>
-    <form id="configForm" class="grid">
-      <div class="col-12">
-        <label for="unitLabelSelect">Unit label</label>
-        <select id="unitLabelSelect" name="unitLabel">
-          <option value="Drone">Drone</option>
-          <option value="Monkey">Monkey</option>
-        </select>
-        <p class="help">Controls how units are referenced across the UI.</p>
-      </div>
-      <fieldset id="webhookFields" class="col-12 provider-fields">
-        <legend>Webhook export</legend>
-        <label class="switch">
-          <input id="webhookEnabled" type="checkbox" />
-          <span>Enable per-entry webhook dispatch</span>
-        </label>
-        <p class="help">Send each recorded entry to an external endpoint using the same columns as the CSV export.</p>
-        <label for="webhookUrl">Webhook URL</label>
-        <input id="webhookUrl" type="url" autocomplete="off" placeholder="https://example.com/webhook" />
-        <label for="webhookMethod">HTTP method</label>
-        <select id="webhookMethod">
-          <option>POST</option>
-          <option>PUT</option>
-        </select>
-        <label for="webhookSecret">Shared secret (optional)</label>
-        <input id="webhookSecret" type="text" autocomplete="off" placeholder="Used for X-Drone-Webhook-Secret header" />
-        <label for="webhookHeaders">Additional headers (optional)</label>
-        <textarea id="webhookHeaders" placeholder="One per line, e.g., Authorization: Bearer token"></textarea>
-        <div id="webhookPreview" class="webhook-preview" aria-live="polite"></div>
-      </fieldset>
-      <fieldset id="staffFields" class="col-12 provider-fields">
-        <legend>Pilots, monkey leads &amp; crew</legend>
-        <p class="help">Add one name per line. These lists feed the Lead and Pilot workspaces.</p>
-        <label for="pilotList">Pilots</label>
-        <textarea id="pilotList" class="list-input" placeholder="e.g., Alex"></textarea>
-        <label for="monkeyLeadList">Monkey leads</label>
-        <textarea id="monkeyLeadList" class="list-input" placeholder="e.g., Cleo"></textarea>
-        <label for="crewList">Crew</label>
-        <textarea id="crewList" class="list-input" placeholder="e.g., Jamie"></textarea>
-      </fieldset>
-      <fieldset id="exportFields" class="col-12 provider-fields">
-        <legend>Lead exports</legend>
-        <p class="help">Download the currently selected show for offline analysis.</p>
-        <div class="row" style="justify-content:flex-start; gap:10px;">
-          <button type="button" id="leadExportCsv" class="btn ghost">Export CSV</button>
-          <button type="button" id="leadExportJson" class="btn ghost">Export JSON</button>
+      <nav class="config-nav" aria-label="Settings categories">
+        <button type="button" class="config-nav-btn is-active" data-config-target="lead">Lead settings</button>
+        <button type="button" class="config-nav-btn" data-config-target="admin">Admin settings</button>
+      </nav>
+      <div id="adminPinPrompt" class="pin-prompt" role="alertdialog" aria-modal="true" aria-labelledby="adminPinTitle" hidden>
+        <div class="pin-card">
+          <h3 id="adminPinTitle">Admin PIN required</h3>
+          <p class="help">Enter the 4-digit PIN to continue.</p>
+          <label for="adminPinInput">PIN</label>
+          <input id="adminPinInput" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="off" aria-describedby="adminPinHelp" />
+          <p id="adminPinHelp" class="help">Use PIN 4206.</p>
+          <div class="row pin-actions">
+            <button type="button" id="adminPinCancel" class="btn ghost">Cancel</button>
+            <button type="button" id="adminPinSubmit" class="btn primary">Unlock</button>
+          </div>
+          <div id="adminPinError" class="error" role="alert" hidden>Incorrect PIN. Try again.</div>
         </div>
-      </fieldset>
-      <div class="col-12 row" style="justify-content: flex-end; gap: 10px;">
-        <button type="button" id="cancelConfig" class="btn ghost">Cancel</button>
-        <button type="submit" class="btn primary">Save settings</button>
       </div>
-      <div class="col-12">
-        <div id="configMessage" role="status" aria-live="polite" class="help"></div>
-      </div>
-    </form>
-  </div>
+      <form id="configForm" class="config-form">
+        <section class="config-section grid is-active" data-config-section="lead">
+          <fieldset id="staffFields" class="col-12 provider-fields">
+            <legend>Pilots, monkey leads &amp; crew</legend>
+            <p class="help">Add one name per line. These lists feed the Lead and Pilot workspaces.</p>
+            <label for="pilotList">Pilots</label>
+            <textarea id="pilotList" class="list-input" placeholder="e.g., Alex"></textarea>
+            <label for="monkeyLeadList">Monkey leads</label>
+            <textarea id="monkeyLeadList" class="list-input" placeholder="e.g., Cleo"></textarea>
+            <label for="crewList">Crew</label>
+            <textarea id="crewList" class="list-input" placeholder="e.g., Jamie"></textarea>
+          </fieldset>
+          <fieldset id="exportFields" class="col-12 provider-fields">
+            <legend>Lead exports</legend>
+            <p class="help">Download the currently selected show for offline analysis.</p>
+            <div class="row" style="justify-content:flex-start; gap:10px;">
+              <button type="button" id="leadExportCsv" class="btn ghost">Export CSV</button>
+              <button type="button" id="leadExportJson" class="btn ghost">Export JSON</button>
+            </div>
+          </fieldset>
+        </section>
+        <section class="config-section grid" data-config-section="admin" aria-hidden="true">
+          <div class="col-12">
+            <label for="unitLabelSelect">Unit label</label>
+            <select id="unitLabelSelect" name="unitLabel">
+              <option value="Drone">Drone</option>
+              <option value="Monkey">Monkey</option>
+            </select>
+            <p class="help">Controls how units are referenced across the UI.</p>
+          </div>
+          <fieldset id="webhookFields" class="col-12 provider-fields">
+            <legend>Webhook export</legend>
+            <label class="switch">
+              <input id="webhookEnabled" type="checkbox" />
+              <span>Enable per-entry webhook dispatch</span>
+            </label>
+            <p class="help">Send each recorded entry to an external endpoint using the same columns as the CSV export.</p>
+            <label for="webhookUrl">Webhook URL</label>
+            <input id="webhookUrl" type="url" autocomplete="off" placeholder="https://example.com/webhook" />
+            <label for="webhookMethod">HTTP method</label>
+            <select id="webhookMethod">
+              <option>POST</option>
+              <option>PUT</option>
+            </select>
+            <label for="webhookSecret">Shared secret (optional)</label>
+            <input id="webhookSecret" type="text" autocomplete="off" placeholder="Used for X-Drone-Webhook-Secret header" />
+            <label for="webhookHeaders">Additional headers (optional)</label>
+            <textarea id="webhookHeaders" placeholder="One per line, e.g., Authorization: Bearer token"></textarea>
+            <div id="webhookPreview" class="webhook-preview" aria-live="polite"></div>
+          </fieldset>
+        </section>
+        <div class="config-actions row">
+          <div class="grow"></div>
+          <button type="button" id="cancelConfig" class="btn ghost">Cancel</button>
+          <button type="submit" class="btn primary">Save settings</button>
+        </div>
+        <div class="config-status">
+          <div id="configMessage" role="status" aria-live="polite" class="help"></div>
+        </div>
+      </form>
+    </aside>
 
-  <div class="container" role="main">
+    <div id="appMain" class="app-main">
+      <div class="topbar" role="banner">
+        <div class="toolbar topbar-toolbar">
+          <div class="topbar-section topbar-left">
+            <button id="configBtn" class="btn icon-btn hamburger-btn" aria-haspopup="dialog" aria-expanded="false" aria-controls="configPanel" title="Open settings">
+              <span class="hamburger-icon" aria-hidden="true">
+                <span></span>
+                <span></span>
+                <span></span>
+              </span>
+              <span class="sr-only">Open settings</span>
+            </button>
+            <img src="./assets/sphere-logo.svg" alt="Sphere" class="app-logo" />
+          </div>
+          <div class="topbar-section topbar-center">
+            <button id="roleHome" class="btn ghost" type="button">← Choose role</button>
+            <button id="refreshShows" type="button" class="btn ghost">Refresh data</button>
+          </div>
+          <div class="topbar-section topbar-right">
+            <span id="viewBadge" class="view-badge">Lead workspace</span>
+            <div class="title-stack">
+              <h1 class="app-title">Flight Log Form</h1>
+              <span class="title-sub">Tracking <span id="appTitle">Drone</span> activity</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="container" role="main">
     <section id="landingView" class="panel landing-panel view-landing-only" aria-labelledby="landingTitle">
       <h2 id="landingTitle">Choose workspace</h2>
       <p class="lead">Select the role you need for this session.</p>
@@ -255,6 +285,8 @@
 
     <section id="groups" class="view-lead-only"></section>
   </div>
+</div>
+</div>
 
   <div id="editModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="editTitle">
     <div class="modal">
