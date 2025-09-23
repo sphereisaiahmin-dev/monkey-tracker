@@ -658,10 +658,27 @@ function onPlanLaunchChange(){
   updateIssueVisibility();
 }
 
+function collectShowHeaderValues(){
+  const crewSelected = showCrewSelect
+    ? Array.from(showCrewSelect.selectedOptions).map(opt => opt.value).filter(Boolean)
+    : [];
+  return {
+    date: showDate?.value || '',
+    time: showTime?.value || '',
+    label: showLabel?.value.trim() || '',
+    crew: normalizeNameList(crewSelected),
+    leadPilot: leadPilotSelect?.value?.trim() || '',
+    monkeyLead: monkeyLeadSelect?.value?.trim() || '',
+    notes: showNotes?.value.trim() || ''
+  };
+}
+
 async function onNewShow(){
   closeAllShowMenus();
   try{
-    const payload = await apiRequest('/api/shows', {method:'POST', body: JSON.stringify({})});
+    const currentShow = getCurrentShow();
+    const initialValues = currentShow ? {} : collectShowHeaderValues();
+    const payload = await apiRequest('/api/shows', {method:'POST', body: JSON.stringify(initialValues)});
     upsertShow(payload);
     setCurrentShow(payload.id);
     notifyShowsChanged({showId: payload.id});
