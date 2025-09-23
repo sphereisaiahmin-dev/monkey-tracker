@@ -1454,6 +1454,12 @@ function toggleConfig(open){
 
 function setConfigSection(section){
   currentConfigSection = section;
+  if(section !== 'admin'){
+    if(adminUnlocked){
+      adminUnlocked = false;
+    }
+    closeAdminPinPrompt();
+  }
   if(configSections.length){
     configSections.forEach(sec=>{
       const isActive = sec.dataset.configSection === section;
