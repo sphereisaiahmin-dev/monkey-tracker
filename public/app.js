@@ -43,9 +43,7 @@ const state = {
     headerCount: 0
   },
   staff: {
-    crew: [],
-    pilots: [],
-    monkeyLeads: []
+
   }
 };
 
@@ -119,7 +117,7 @@ const refreshShowsBtn = el('refreshShows');
 const lanAddressEl = el('lanAddress');
 const pilotListInput = el('pilotList');
 const crewListInput = el('crewList');
-const monkeyLeadListInput = el('monkeyLeadList');
+
 
 init().catch(err=>{
   console.error(err);
@@ -282,16 +280,7 @@ async function loadStaff(){
     const data = await apiRequest('/api/staff');
     const crew = normalizeNameList(Array.isArray(data.crew) ? data.crew : [], {sort: true});
     const pilots = normalizeNameList(Array.isArray(data.pilots) ? data.pilots : [], {sort: true});
-    const monkeyLeads = normalizeNameList(Array.isArray(data.monkeyLeads) ? data.monkeyLeads : [], {sort: true});
-    state.staff = {crew, pilots, monkeyLeads};
-  }catch(err){
-    console.error('Failed to load staff', err);
-    if(!state.staff){
-      state.staff = {crew: [], pilots: [], monkeyLeads: []};
-    }else{
-      state.staff.crew = [];
-      state.staff.pilots = [];
-      state.staff.monkeyLeads = [];
+
     }
     toast('Failed to load staff directory', true);
   }
@@ -1226,10 +1215,7 @@ function renderOperatorOptions(){
     return;
   }
   const current = operator.value;
-  const show = getCurrentShow();
-  const names = getCrewNames([show?.crew || [], show?.leadPilot, show?.monkeyLead, current]);
-  if(!names.length){
-    operator.innerHTML = '<option value="">Add crew or monkey leads in settings</option>';
+  
     operator.value = '';
     operator.disabled = true;
     return;
@@ -1286,8 +1272,7 @@ async function onConfigSubmit(event){
   event.preventDefault();
   const staffPayload = {
     pilots: parseStaffTextarea(pilotListInput ? pilotListInput.value : ''),
-    crew: parseStaffTextarea(crewListInput ? crewListInput.value : ''),
-    monkeyLeads: parseStaffTextarea(monkeyLeadListInput ? monkeyLeadListInput.value : '')
+
   };
   const payload = {
     unitLabel: unitLabelSelect.value,
@@ -1306,8 +1291,7 @@ async function onConfigSubmit(event){
     const savedStaff = await apiRequest('/api/staff', {method: 'PUT', body: JSON.stringify(staffPayload)});
     state.staff = {
       pilots: normalizeNameList(savedStaff?.pilots || [], {sort: true}),
-      crew: normalizeNameList(savedStaff?.crew || [], {sort: true}),
-      monkeyLeads: normalizeNameList(savedStaff?.monkeyLeads || [], {sort: true})
+
     };
     populateStaffSettings();
     renderCrewOptions(getCurrentShow()?.crew || []);
@@ -1719,9 +1703,7 @@ function populateStaffSettings(){
   if(crewListInput){
     crewListInput.value = (state.staff?.crew || []).join('\n');
   }
-  if(monkeyLeadListInput){
-    monkeyLeadListInput.value = (state.staff?.monkeyLeads || []).join('\n');
-  }
+
 }
 
 function parseStaffTextarea(value){
@@ -1736,12 +1718,7 @@ function getPilotNames(additional = []){
   return normalizeNameList([state.staff?.pilots || [], additional], {sort: true});
 }
 
-function getMonkeyLeadNames(additional = []){
-  return normalizeNameList([state.staff?.monkeyLeads || [], additional], {sort: true});
-}
 
-function getCrewNames(additional = []){
-  return normalizeNameList([state.staff?.crew || [], state.staff?.monkeyLeads || [], additional], {sort: true});
 }
 
 function renderCrewOptions(selected = []){
@@ -1751,7 +1728,7 @@ function renderCrewOptions(selected = []){
   const selectedList = normalizeNameList(selected);
   const crewNames = getCrewNames([selectedList]);
   if(!crewNames.length){
-    showCrewSelect.innerHTML = '<option value="">Add crew or monkey leads in settings</option>';
+
     showCrewSelect.disabled = true;
     return;
   }
@@ -1767,43 +1744,7 @@ function renderPilotAssignments(show){
   if(!leadPilotSelect || !monkeyLeadSelect){
     return;
   }
-  const pilotNames = getPilotNames([show?.leadPilot]);
-  if(!pilotNames.length){
-    leadPilotSelect.innerHTML = '<option value="">Add pilots in settings</option>';
-    leadPilotSelect.disabled = true;
-    leadPilotSelect.value = '';
-  }else{
-    const pilotOptions = [''].concat(pilotNames).map(name=>{
-      if(!name){
-        return '<option value="">Select</option>';
-      }
-      return `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`;
-    }).join('');
-    leadPilotSelect.innerHTML = pilotOptions;
-    leadPilotSelect.disabled = false;
-    const leadValue = show?.leadPilot || '';
-    const leadMatch = pilotNames.find(name => name.toLowerCase() === leadValue.toLowerCase());
-    leadPilotSelect.value = leadMatch || '';
-  }
 
-  const monkeyNames = getMonkeyLeadNames([show?.monkeyLead]);
-  if(!monkeyNames.length){
-    monkeyLeadSelect.innerHTML = '<option value="">Add monkey leads in settings</option>';
-    monkeyLeadSelect.disabled = true;
-    monkeyLeadSelect.value = '';
-  }else{
-    const monkeyOptions = [''].concat(monkeyNames).map(name=>{
-      if(!name){
-        return '<option value="">Select</option>';
-      }
-      return `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`;
-    }).join('');
-    monkeyLeadSelect.innerHTML = monkeyOptions;
-    monkeyLeadSelect.disabled = false;
-    const monkeyValue = show?.monkeyLead || '';
-    const monkeyMatch = monkeyNames.find(name => name.toLowerCase() === monkeyValue.toLowerCase());
-    monkeyLeadSelect.value = monkeyMatch || '';
-  }
 }
 
 function normalizeNameList(list = [], options = {}){
