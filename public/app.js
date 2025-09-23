@@ -30,6 +30,8 @@ const state = {
   serverPort: 3000,
   storageLabel: 'SQL.js storage v2',
   isCreatingShow: false,
+  showHeaderSnapshots: new Map(),
+  showModifiedAt: new Map(),
   webhookConfig: {
     enabled: false,
     url: '',
@@ -318,6 +320,7 @@ async function loadShows(){
     };
     state.shows = Array.isArray(data.shows) ? data.shows : [];
     sortShows();
+    refreshShowHeaderSnapshots();
     const fallbackId = state.shows[0]?.id || null;
     state.currentShowId = previousId && state.shows.some(show=>show.id===previousId) ? previousId : fallbackId;
     updateConnectionIndicator();
@@ -487,8 +490,30 @@ function getCurrentShow(){
 
 function setCurrentShow(showId, options = {}){
   const {skipPilotSync = false, skipRender = false} = options;
+  const previousId = state.currentShowId;
+  if(previousId && previousId !== showId){
+    const previousShow = state.shows.find(s=>s.id===previousId);
+    if(previousShow){
+      if(!(state.showHeaderSnapshots instanceof Map)){
+        state.showHeaderSnapshots = new Map();
+      }
+      state.showHeaderSnapshots.set(previousId, buildShowHeaderSnapshot(previousShow));
+    }
+    if(state.showModifiedAt instanceof Map){
+      state.showModifiedAt.delete(previousId);
+    }
+  }
+  const changed = previousId !== showId;
   state.currentShowId = showId || null;
   const show = getCurrentShow();
+  if(changed && show?.id){
+    if(!(state.showHeaderSnapshots instanceof Map)){
+      state.showHeaderSnapshots = new Map();
+    }
+    if(!state.showHeaderSnapshots.has(show.id)){
+      state.showHeaderSnapshots.set(show.id, buildShowHeaderSnapshot(show));
+    }
+  }
   fillHeader(show);
   renderOperatorOptions();
   updateIssueVisibility();
@@ -667,11 +692,135 @@ function collectShowHeaderValues(){
     date: showDate?.value || '',
     time: showTime?.value || '',
     label: showLabel?.value.trim() || '',
-    crew: normalizeNameList(crewSelected),
+    crew: normalizeNameList(crewSelected, {sort: true}),
     leadPilot: leadPilotSelect?.value?.trim() || '',
     monkeyLead: monkeyLeadSelect?.value?.trim() || '',
     notes: showNotes?.value.trim() || ''
   };
+}
+
+function buildShowHeaderSnapshot(source = {}){
+  return {
+    date: typeof source.date === 'string' ? source.date.trim() : '',
+    time: typeof source.time === 'string' ? source.time.trim() : '',
+    label: typeof source.label === 'string' ? source.label.trim() : '',
+    crew: normalizeNameList(source.crew || [], {sort: true}),
+    leadPilot: typeof source.leadPilot === 'string' ? source.leadPilot.trim() : '',
+    monkeyLead: typeof source.monkeyLead === 'string' ? source.monkeyLead.trim() : '',
+    notes: typeof source.notes === 'string' ? source.notes.trim() : ''
+  };
+}
+
+function areShowHeadersEqual(a = {}, b = {}){
+  if(a.date !== b.date){ return false; }
+  if(a.time !== b.time){ return false; }
+  if(a.label !== b.label){ return false; }
+  if(a.leadPilot !== b.leadPilot){ return false; }
+  if(a.monkeyLead !== b.monkeyLead){ return false; }
+  if(a.notes !== b.notes){ return false; }
+  const crewA = Array.isArray(a.crew) ? a.crew : [];
+  const crewB = Array.isArray(b.crew) ? b.crew : [];
+  if(crewA.length !== crewB.length){ return false; }
+  for(let i = 0; i < crewA.length; i += 1){
+    if(crewA[i] !== crewB[i]){
+      return false;
+    }
+  }
+  return true;
+}
+
+function refreshShowHeaderSnapshots(){
+  if(!(state.showHeaderSnapshots instanceof Map)){
+    state.showHeaderSnapshots = new Map();
+  }
+  const next = new Map();
+  state.shows.forEach(show =>{
+    if(show?.id){
+      next.set(show.id, buildShowHeaderSnapshot(show));
+    }
+  });
+  state.showHeaderSnapshots = next;
+}
+
+function getShowHeaderSnapshot(id){
+  if(!(state.showHeaderSnapshots instanceof Map)){
+    state.showHeaderSnapshots = new Map();
+  }
+  return state.showHeaderSnapshots.get(id) || null;
+}
+
+function cloneShowHeaderSnapshot(snapshot){
+  if(!snapshot){
+    return null;
+  }
+  return {
+    date: snapshot.date || '',
+    time: snapshot.time || '',
+    label: snapshot.label || '',
+    crew: Array.isArray(snapshot.crew) ? snapshot.crew.slice() : [],
+    leadPilot: snapshot.leadPilot || '',
+    monkeyLead: snapshot.monkeyLead || '',
+    notes: snapshot.notes || ''
+  };
+}
+
+function hasShowHeaderContent(snapshot = {}){
+  if(!snapshot){
+    return false;
+  }
+  if(snapshot.date || snapshot.time || snapshot.label || snapshot.leadPilot || snapshot.monkeyLead || snapshot.notes){
+    return true;
+  }
+  return Array.isArray(snapshot.crew) && snapshot.crew.length > 0;
+}
+
+function mergeShowHeaderSnapshots(base = {}, overrides = {}, baseline = {}){
+  const result = {};
+  const baselineSafe = baseline || {};
+  function pick(field){
+    const overrideValue = overrides[field];
+    const baseValue = base[field];
+    const baselineValue = baselineSafe[field];
+    if(overrideValue !== undefined && overrideValue !== null){
+      if(overrideValue !== ''){
+        return overrideValue;
+      }
+      if(baseValue !== baselineValue){
+        return baseValue || '';
+      }
+      return '';
+    }
+    return baseValue || '';
+  }
+  result.date = overrides.date || base.date || '';
+  result.time = overrides.time || base.time || '';
+  result.label = pick('label');
+  result.leadPilot = pick('leadPilot');
+  result.monkeyLead = pick('monkeyLead');
+  result.notes = pick('notes');
+  const overrideCrew = Array.isArray(overrides.crew) ? overrides.crew : [];
+  const baseCrew = Array.isArray(base.crew) ? base.crew : [];
+  const baselineCrew = Array.isArray(baselineSafe.crew) ? baselineSafe.crew : [];
+  if(overrideCrew.length > 0){
+    result.crew = overrideCrew.slice();
+  }else if(baseCrew.length > 0 && !arraysShallowEqual(baseCrew, baselineCrew)){
+    result.crew = baseCrew.slice();
+  }else{
+    result.crew = overrideCrew.length ? overrideCrew.slice() : baseCrew.slice();
+  }
+  return result;
+}
+
+function arraysShallowEqual(a = [], b = []){
+  if(a.length !== b.length){
+    return false;
+  }
+  for(let i = 0; i < a.length; i += 1){
+    if(a[i] !== b[i]){
+      return false;
+    }
+  }
+  return true;
 }
 
 function setShowHeaderDisabled(disabled){
@@ -717,14 +866,63 @@ async function onNewShow(){
   }
   const previousId = state.currentShowId;
   const currentShow = getCurrentShow();
-  const initialValues = currentShow ? {} : collectShowHeaderValues();
+  const headerValues = collectShowHeaderValues();
+  const domSnapshot = buildShowHeaderSnapshot(headerValues);
+  const baselineSnapshot = previousId ? cloneShowHeaderSnapshot(getShowHeaderSnapshot(previousId)) : null;
+  const currentSnapshot = currentShow ? buildShowHeaderSnapshot(currentShow) : null;
+  const candidateHeader = currentShow
+    ? mergeShowHeaderSnapshots(currentSnapshot || {}, domSnapshot, baselineSnapshot || {})
+    : domSnapshot;
+  let initialValues = currentShow ? {} : domSnapshot;
+  let restorePrevious = false;
+  let previousSnapshot = null;
+  if(currentShow && previousId){
+    const hasBaseline = Boolean(baselineSnapshot);
+    const hasChangesFromBaseline = baselineSnapshot && currentSnapshot
+      ? !areShowHeadersEqual(currentSnapshot, baselineSnapshot)
+      : false;
+    const hasDomDifference = baselineSnapshot
+      ? !areShowHeadersEqual(domSnapshot, baselineSnapshot)
+      : hasShowHeaderContent(domSnapshot);
+    const shouldOfferHeader = hasChangesFromBaseline || hasDomDifference || hasShowHeaderContent(candidateHeader);
+    if(shouldOfferHeader){
+      let useHeaderValues = true;
+      if(typeof window !== 'undefined' && typeof window.confirm === 'function'){
+        useHeaderValues = window.confirm(
+          'Use the current header values for a new show?\n\nClick OK to move these details into a new show and restore the selected show to its previous data. Click Cancel to start a blank show instead.'
+        );
+      }
+      if(useHeaderValues){
+        initialValues = candidateHeader;
+        previousSnapshot = baselineSnapshot;
+        restorePrevious = hasBaseline && Boolean(previousSnapshot);
+      }else{
+        initialValues = {};
+      }
+    }else{
+      initialValues = {};
+    }
+  }
   state.isCreatingShow = true;
   setShowHeaderDisabled(true);
   setNewShowButtonBusy(true);
   try{
-    const payload = await apiRequest('/api/shows', {method:'POST', body: JSON.stringify(initialValues)});
+    const payload = await apiRequest('/api/shows', {method:'POST', body: initialValues});
     upsertShow(payload);
     setCurrentShow(payload.id);
+    if(restorePrevious && previousId && previousSnapshot){
+      try{
+        const restored = await apiRequest(`/api/shows/${previousId}`, {method:'PUT', body: previousSnapshot});
+        upsertShow(restored);
+        if(state.showHeaderSnapshots instanceof Map){
+          state.showHeaderSnapshots.set(previousId, buildShowHeaderSnapshot(restored));
+        }
+        renderGroups();
+      }catch(err){
+        console.error('Failed to restore previous show header', err);
+        toast('Previous show kept the latest values', true);
+      }
+    }
     notifyShowsChanged({showId: payload.id});
     clearEntryForm();
     toast('New show created');
@@ -786,6 +984,43 @@ async function duplicateShow(showId){
   }
 }
 
+function applyUpdatedShowField(field, show){
+  if(!show || show.id !== state.currentShowId){
+    return;
+  }
+  switch(field){
+    case 'date':
+      if(showDate && showDate.value !== (show.date || '')){
+        showDate.value = show.date || '';
+      }
+      break;
+    case 'time':
+      if(showTime && showTime.value !== (show.time || '')){
+        showTime.value = show.time || '';
+      }
+      break;
+    case 'label':
+      if(showLabel && showLabel.value !== (show.label || '')){
+        showLabel.value = show.label || '';
+      }
+      break;
+    case 'notes':
+      if(showNotes && showNotes.value !== (show.notes || '')){
+        showNotes.value = show.notes || '';
+      }
+      break;
+    case 'crew':
+      renderCrewOptions(show.crew || []);
+      break;
+    case 'leadPilot':
+    case 'monkeyLead':
+      renderPilotAssignments(show);
+      break;
+    default:
+      break;
+  }
+}
+
 async function updateShowField(field, value){
   if(state.isCreatingShow){
     return;
@@ -794,10 +1029,18 @@ async function updateShowField(field, value){
   if(!show){
     return;
   }
+  if(!(state.showModifiedAt instanceof Map)){
+    state.showModifiedAt = new Map();
+  }
+  state.showModifiedAt.set(show.id, Date.now());
   try{
-    const updated = await apiRequest(`/api/shows/${show.id}`, {method:'PUT', body: JSON.stringify({[field]: value})});
+    const updated = await apiRequest(`/api/shows/${show.id}`, {method:'PUT', body: {[field]: value}});
     upsertShow(updated);
-    setCurrentShow(updated.id);
+    applyUpdatedShowField(field, updated);
+    renderOperatorOptions();
+    renderGroups();
+    updateWebhookPreview();
+    syncPilotShowSelect();
     notifyShowsChanged({showId: updated.id});
   }catch(err){
     console.error(err);
