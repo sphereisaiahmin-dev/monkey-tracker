@@ -1096,7 +1096,9 @@ function setLanAddress(){
 
 function setProviderBadge(label){
   if(!providerBadge){ return; }
-  providerBadge.classList.remove('provider-coda');
+  Array.from(providerBadge.classList)
+    .filter(cls => cls.startsWith('provider-'))
+    .forEach(cls => providerBadge.classList.remove(cls));
   providerBadge.classList.add('provider-sql');
   const text = label || 'SQL.js storage v2';
   providerBadge.textContent = text;
