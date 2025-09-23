@@ -111,6 +111,13 @@ const closeConfigBtn = el('closeConfig');
 const cancelConfigBtn = el('cancelConfig');
 const configForm = el('configForm');
 const configMessage = el('configMessage');
+const configNavButtons = qsa('[data-config-target]');
+const configSections = qsa('[data-config-section]');
+const adminPinPrompt = el('adminPinPrompt');
+const adminPinInput = el('adminPinInput');
+const adminPinSubmit = el('adminPinSubmit');
+const adminPinCancel = el('adminPinCancel');
+const adminPinError = el('adminPinError');
 const unitLabelSelect = el('unitLabelSelect');
 const webhookEnabled = el('webhookEnabled');
 const webhookUrl = el('webhookUrl');
@@ -134,6 +141,14 @@ const lanAddressEl = el('lanAddress');
 const pilotListInput = el('pilotList');
 const crewListInput = el('crewList');
 const monkeyLeadListInput = el('monkeyLeadList');
+
+const ADMIN_PIN = '4206';
+let adminUnlocked = false;
+let currentConfigSection = 'lead';
+
+if(configPanel){
+  configPanel.setAttribute('aria-hidden', 'true');
+}
 
 init().catch(err=>{
   console.error(err);
@@ -215,6 +230,36 @@ function initUI(){
   configBtn.addEventListener('click', ()=> toggleConfig(true));
   closeConfigBtn.addEventListener('click', ()=> toggleConfig(false));
   cancelConfigBtn.addEventListener('click', ()=> toggleConfig(false));
+  if(configNavButtons.length){
+    configNavButtons.forEach(btn=>{
+      btn.setAttribute('aria-pressed', btn.classList.contains('is-active') ? 'true' : 'false');
+      btn.addEventListener('click', ()=>{
+        const target = btn.dataset.configTarget;
+        if(target === 'admin' && !adminUnlocked){
+          openAdminPinPrompt();
+          return;
+        }
+        setConfigSection(target || 'lead');
+      });
+    });
+  }
+  if(adminPinSubmit){
+    adminPinSubmit.addEventListener('click', submitAdminPin);
+  }
+  if(adminPinCancel){
+    adminPinCancel.addEventListener('click', ()=>{
+      closeAdminPinPrompt();
+      setConfigSection('lead');
+    });
+  }
+  if(adminPinInput){
+    adminPinInput.addEventListener('keydown', event=>{
+      if(event.key === 'Enter'){
+        event.preventDefault();
+        submitAdminPin();
+      }
+    });
+  }
   document.addEventListener('keydown', e=>{
     if(e.key === 'Escape'){
       closeAllShowMenus();
@@ -224,6 +269,8 @@ function initUI(){
   });
 
   configForm.addEventListener('submit', onConfigSubmit);
+  setConfigSection('lead');
+  closeAdminPinPrompt();
   if(webhookEnabled){
     webhookEnabled.addEventListener('change', ()=>{
       syncWebhookFields();
@@ -1392,8 +1439,91 @@ function toggleConfig(open){
   configBtn.setAttribute('aria-expanded', String(open));
   configBtn.classList.toggle('is-active', open);
   configPanel.classList.toggle('open', open);
+  if(configPanel){
+    configPanel.setAttribute('aria-hidden', open ? 'false' : 'true');
+  }
+  document.body.classList.toggle('menu-open', open);
   if(open){
     configMessage.textContent = '';
+  }else{
+    adminUnlocked = false;
+    closeAdminPinPrompt();
+    setConfigSection('lead');
+  }
+}
+
+function setConfigSection(section){
+  currentConfigSection = section;
+  if(configSections.length){
+    configSections.forEach(sec=>{
+      const isActive = sec.dataset.configSection === section;
+      sec.classList.toggle('is-active', isActive);
+      sec.setAttribute('aria-hidden', isActive ? 'false' : 'true');
+    });
+  }
+  if(configNavButtons.length){
+    configNavButtons.forEach(btn=>{
+      const isActive = btn.dataset.configTarget === section;
+      btn.classList.toggle('is-active', isActive);
+      btn.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+    });
+  }
+}
+
+function openAdminPinPrompt(){
+  if(adminUnlocked){
+    setConfigSection('admin');
+    return;
+  }
+  if(adminPinPrompt){
+    adminPinPrompt.hidden = false;
+    adminPinPrompt.setAttribute('aria-hidden', 'false');
+    if(adminPinError){
+      adminPinError.hidden = true;
+    }
+    if(adminPinInput){
+      adminPinInput.value = '';
+      requestAnimationFrame(()=> adminPinInput.focus());
+    }
+    return;
+  }
+  const pin = window.prompt('Enter admin PIN');
+  if(pin === ADMIN_PIN){
+    adminUnlocked = true;
+    setConfigSection('admin');
+  }else if(pin !== null){
+    toast('Incorrect PIN', true);
+  }
+}
+
+function closeAdminPinPrompt(){
+  if(adminPinPrompt){
+    adminPinPrompt.hidden = true;
+    adminPinPrompt.setAttribute('aria-hidden', 'true');
+  }
+  if(adminPinInput){
+    adminPinInput.value = '';
+  }
+  if(adminPinError){
+    adminPinError.hidden = true;
+  }
+}
+
+function submitAdminPin(){
+  if(!adminPinInput){
+    return;
+  }
+  const value = adminPinInput.value ? adminPinInput.value.trim() : '';
+  if(value === ADMIN_PIN){
+    adminUnlocked = true;
+    closeAdminPinPrompt();
+    setConfigSection('admin');
+  }else{
+    if(adminPinError){
+      adminPinError.hidden = false;
+    }
+    adminPinInput.focus();
+    adminPinInput.select?.();
   }
 }
 
