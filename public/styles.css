@@ -95,7 +95,6 @@ body.view-landing #landingView{display:block}
   flex:1 1 220px;
   max-width:320px;
 }
-.role-btn{min-width:160px;font-size:18px;padding:18px 26px}
 .view-badge{
   background:transparent;
   border:none;
@@ -482,6 +481,42 @@ input:focus, select:focus, textarea:focus, .btn:focus-visible, .chip-input input
 .btn:hover{background:#232733}
 .btn:active{transform:translateY(1px)}
 .btn.primary{background:var(--primary); border-color:var(--primary-2); color:#041423}
+.btn.role-btn{
+  min-width:160px;
+  font-size:18px;
+  padding:18px 26px;
+  background:rgba(17, 20, 28, 0.96);
+  border-color:rgba(86, 108, 164, 0.45);
+  color:var(--text);
+  transition:background-color .2s ease, border-color .2s ease, color .2s ease,
+    opacity .2s ease, transform .15s ease;
+}
+
+.btn.role-btn:hover,
+.btn.role-btn:focus-visible{
+  opacity:0.92;
+}
+
+#chooseLead.btn.role-btn:hover,
+#chooseLead.btn.role-btn:focus-visible{
+  background-color:#2563eb;
+  border-color:#1d4ed8;
+  color:#f8faff;
+}
+
+#choosePilot.btn.role-btn:hover,
+#choosePilot.btn.role-btn:focus-visible{
+  background-color:#16a34a;
+  border-color:#15803d;
+  color:#f1fff7;
+}
+
+#chooseArchive.btn.role-btn:hover,
+#chooseArchive.btn.role-btn:focus-visible{
+  background-color:#7c3aed;
+  border-color:#6d28d9;
+  color:#f5f1ff;
+}
 .btn.ghost{background:transparent}
 .btn.icon-btn{width:var(--tap-min); height:var(--tap-min); display:inline-grid; place-items:center; border-radius:12px;}
 .hamburger-btn{padding:0;}
