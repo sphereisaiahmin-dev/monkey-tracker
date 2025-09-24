@@ -74,6 +74,7 @@ class SqlProvider {
 
   async createShow(input){
     const payload = input || {};
+    this._assertRequiredShowFields(payload);
     const now = Date.now();
     const createdAtCandidate = Number(payload.createdAt);
     const updatedAtCandidate = Number(payload.updatedAt);
@@ -100,6 +101,7 @@ class SqlProvider {
     if(!existing){
       return null;
     }
+    this._assertRequiredShowFields({...existing, ...updates});
     const updated = this._normalizeShow({
       ...existing,
       ...updates,
@@ -112,9 +114,32 @@ class SqlProvider {
   }
 
   async deleteShow(id){
-    this._run('DELETE FROM shows WHERE id = ?', [id]);
+    if(!id){
+      return null;
+    }
+    const row = this._selectOne('SELECT data FROM shows WHERE id = ?', [id]);
+    if(!row){
+      return null;
+    }
+    let show;
+    try{
+      show = JSON.parse(row.data);
+    }catch(err){
+      show = null;
+    }
+    if(!show || typeof show !== 'object'){
+      this._run('DELETE FROM shows WHERE id = ?', [id]);
+      await this._persistDatabase();
+      return null;
+    }
+    const normalized = this._normalizeShow(show);
+    const archiveTime = Date.now();
+    normalized.archivedAt = archiveTime;
+    normalized.deletedAt = archiveTime;
+    this._saveArchiveRow(normalized, archiveTime, archiveTime);
+    this._run('DELETE FROM shows WHERE id = ?', [normalized.id]);
     await this._persistDatabase();
-    await this._refreshArchive();
+    return this.getArchivedShow(id);
   }
 
   async addEntry(showId, entryInput){
@@ -218,19 +243,7 @@ class SqlProvider {
     }
     const normalized = this._normalizeShow(show);
     const archiveTime = Date.now();
-    normalized.archivedAt = archiveTime;
-    const showDate = typeof normalized.date === 'string' ? normalized.date.trim() : '';
-    this._run(`
-      INSERT INTO show_archive (id, data, show_date, created_at, archived_at)
-      VALUES (?, ?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET data = excluded.data, show_date = excluded.show_date, created_at = excluded.created_at, archived_at = excluded.archived_at
-    `, [
-      normalized.id,
-      JSON.stringify(normalized),
-      showDate,
-      this._stringifyTimestamp(this._getTimestamp(normalized.createdAt)),
-      this._stringifyTimestamp(archiveTime)
-    ]);
+    this._saveArchiveRow(normalized, archiveTime, null);
     this._run('DELETE FROM shows WHERE id = ?', [normalized.id]);
     await this._persistDatabase();
     return this.getArchivedShow(id);
@@ -257,6 +270,24 @@ class SqlProvider {
     this._replaceMonkeyLeads(monkeyLeads);
     await this._persistDatabase();
     return {crew, pilots, monkeyLeads};
+  }
+
+  _assertRequiredShowFields(raw = {}){
+    const required = [
+      {key: 'date', label: 'Date'},
+      {key: 'time', label: 'Show start time'},
+      {key: 'label', label: 'Show label'},
+      {key: 'leadPilot', label: 'Lead pilot'},
+      {key: 'monkeyLead', label: 'Monkey lead'}
+    ];
+    required.forEach(field =>{
+      const value = typeof raw[field.key] === 'string' ? raw[field.key].trim() : '';
+      if(!value){
+        const err = new Error(`${field.label} is required`);
+        err.status = 400;
+        throw err;
+      }
+    });
   }
 
   _normalizeShow(raw){
@@ -418,7 +449,8 @@ class SqlProvider {
           data TEXT NOT NULL,
           show_date TEXT,
           created_at TEXT,
-          archived_at TEXT NOT NULL
+          archived_at TEXT NOT NULL,
+          deleted_at TEXT
         )
       `);
       mutated = true;
@@ -429,9 +461,14 @@ class SqlProvider {
           data TEXT NOT NULL,
           show_date TEXT,
           created_at TEXT,
-          archived_at TEXT NOT NULL
+          archived_at TEXT NOT NULL,
+          deleted_at TEXT
         )
       `);
+      if(!this._columnExists('show_archive', 'deleted_at')){
+        this.db.exec('ALTER TABLE show_archive ADD COLUMN deleted_at TEXT');
+        mutated = true;
+      }
     }
 
     return mutated;
@@ -513,6 +550,14 @@ class SqlProvider {
     return Boolean(row);
   }
 
+  _columnExists(table, column){
+    if(!table || !column){
+      return false;
+    }
+    const rows = this._select(`PRAGMA table_info(${table})`);
+    return rows.some(row => row.name === column);
+  }
+
   async _persist(show){
     const payload = JSON.stringify(show);
     const updated = new Date(show.updatedAt || Date.now()).toISOString();
@@ -521,6 +566,31 @@ class SqlProvider {
       ON CONFLICT(id) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at
     `, [show.id, payload, updated]);
     await this._persistDatabase();
+  }
+
+  _saveArchiveRow(show, archivedAt, deletedAt){
+    const archiveTimestamp = this._getTimestamp(archivedAt) ?? Date.now();
+    const deletedTimestamp = this._getTimestamp(deletedAt);
+    show.archivedAt = archiveTimestamp;
+    if(deletedTimestamp !== null){
+      show.deletedAt = deletedTimestamp;
+    }else{
+      delete show.deletedAt;
+    }
+    const payload = JSON.stringify(show);
+    const showDate = typeof show.date === 'string' ? show.date.trim() : '';
+    this._run(`
+      INSERT INTO show_archive (id, data, show_date, created_at, archived_at, deleted_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET data = excluded.data, show_date = excluded.show_date, created_at = excluded.created_at, archived_at = excluded.archived_at, deleted_at = excluded.deleted_at
+    `, [
+      show.id,
+      payload,
+      showDate,
+      this._stringifyTimestamp(this._getTimestamp(show.createdAt)),
+      this._stringifyTimestamp(archiveTimestamp),
+      this._stringifyTimestamp(deletedTimestamp)
+    ]);
   }
 
   _select(query, params = []){
@@ -617,20 +687,9 @@ class SqlProvider {
       if(now - earliest >= DAY_IN_MS){
         const archiveTime = Date.now();
         list.forEach(item =>{
-          const show = item.show;
-          const payload = JSON.stringify(show);
-          this._run(`
-            INSERT INTO show_archive (id, data, show_date, created_at, archived_at)
-            VALUES (?, ?, ?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET data = excluded.data, show_date = excluded.show_date, created_at = excluded.created_at, archived_at = excluded.archived_at
-          `, [
-            show.id,
-            payload,
-            key === '__undated__' ? '' : key,
-            this._stringifyTimestamp(this._getTimestamp(show.createdAt)),
-            this._stringifyTimestamp(archiveTime)
-          ]);
-          this._run('DELETE FROM shows WHERE id = ?', [show.id]);
+          const normalized = this._normalizeShow(item.show);
+          this._saveArchiveRow(normalized, archiveTime, null);
+          this._run('DELETE FROM shows WHERE id = ?', [normalized.id]);
           changed = true;
         });
       }
@@ -683,11 +742,17 @@ class SqlProvider {
     const archivedAt = this._getTimestamp(row.archived_at) ?? this._getTimestamp(show.archivedAt);
     const storedCreated = this._getTimestamp(row.created_at);
     const createdAt = this._getTimestamp(show.createdAt) ?? storedCreated;
+    const deletedAt = this._getTimestamp(row.deleted_at) ?? this._getTimestamp(show.deletedAt);
     if(archivedAt !== null){
       show.archivedAt = archivedAt;
     }
     if(createdAt !== null){
       show.createdAt = createdAt;
+    }
+    if(deletedAt !== null){
+      show.deletedAt = deletedAt;
+    }else{
+      delete show.deletedAt;
     }
     if(!Array.isArray(show.entries)){
       show.entries = [];

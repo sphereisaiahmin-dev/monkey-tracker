@@ -112,13 +112,12 @@ async function bootstrap(){
 
   app.delete('/api/shows/:id', asyncHandler(async (req, res)=>{
     const provider = getProvider();
-    const existing = await provider.getShow(req.params.id);
-    if(!existing){
+    const archived = await provider.deleteShow(req.params.id);
+    if(!archived){
       res.status(404).json({error: 'Show not found'});
       return;
     }
-    await provider.deleteShow(req.params.id);
-    res.status(204).end();
+    res.json(archived);
   }));
 
   app.post('/api/shows/:id/archive', asyncHandler(async (req, res)=>{

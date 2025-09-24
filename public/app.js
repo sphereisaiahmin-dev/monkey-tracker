@@ -24,7 +24,6 @@ function createEmptyShowDraft(){
     date: '',
     time: '',
     label: '',
-    crew: [],
     leadPilot: '',
     monkeyLead: '',
     notes: ''
@@ -42,6 +41,7 @@ const state = {
   serverPort: 3000,
   storageLabel: 'SQL.js storage v2',
   newShowDraft: createEmptyShowDraft(),
+  showHeaderShowErrors: false,
   isCreatingShow: false,
   archivedShows: [],
   currentArchivedShowId: null,
@@ -197,21 +197,15 @@ function initUI(){
     updateIssueVisibility();
   });
 
-  showDate.addEventListener('change', ()=> updateNewShowDraft('date', showDate.value));
-  showTime.addEventListener('change', ()=> updateNewShowDraft('time', showTime.value));
-  showLabel.addEventListener('input', ()=> updateNewShowDraft('label', showLabel.value));
-  showNotes.addEventListener('input', ()=> updateNewShowDraft('notes', showNotes.value));
-  if(showCrewSelect){
-    showCrewSelect.addEventListener('change', ()=>{
-      const selected = Array.from(showCrewSelect.selectedOptions).map(opt=> opt.value).filter(Boolean);
-      updateNewShowDraft('crew', selected);
-    });
-  }
+  showDate.addEventListener('change', ()=> handleShowHeaderChange('date', showDate.value));
+  showTime.addEventListener('change', ()=> handleShowHeaderChange('time', showTime.value));
+  showLabel.addEventListener('input', ()=> handleShowHeaderChange('label', showLabel.value));
+  showNotes.addEventListener('input', ()=> handleShowHeaderChange('notes', showNotes.value));
   if(leadPilotSelect){
-    leadPilotSelect.addEventListener('change', ()=> updateNewShowDraft('leadPilot', leadPilotSelect.value));
+    leadPilotSelect.addEventListener('change', ()=> handleShowHeaderChange('leadPilot', leadPilotSelect.value));
   }
   if(monkeyLeadSelect){
-    monkeyLeadSelect.addEventListener('change', ()=> updateNewShowDraft('monkeyLead', monkeyLeadSelect.value));
+    monkeyLeadSelect.addEventListener('change', ()=> handleShowHeaderChange('monkeyLead', monkeyLeadSelect.value));
   }
 
   const addLineBtn = el('addLine');
@@ -739,7 +733,8 @@ function renderArchiveSelect(){
     const date = formatDateUS(show.date) || 'MM-DD-YYYY';
     const time = formatTime12Hour(show.time) || 'HH:mm';
     const label = show.label ? ` • ${show.label}` : '';
-    return `<option value="${show.id}">${escapeHtml(`${date} • ${time}${label}`)}</option>`;
+    const status = show.deletedAt ? ' (deleted)' : '';
+    return `<option value="${show.id}">${escapeHtml(`${date} • ${time}${label}${status}`)}</option>`;
   }).join('');
   const hasCurrent = state.currentArchivedShowId && shows.some(show=>show.id === state.currentArchivedShowId);
   const selectedId = hasCurrent ? state.currentArchivedShowId : shows[0].id;
@@ -790,7 +785,9 @@ function renderArchiveDetails(show){
   }
   const crewList = Array.isArray(show.crew) && show.crew.length ? show.crew.join(', ') : '—';
   const entries = Array.isArray(show.entries) ? show.entries : [];
+  const deletedOn = show.deletedAt ? (formatDateTime(show.deletedAt) || '—') : '';
   const rows = [
+    ['Status', show.deletedAt ? 'Deleted' : 'Archived'],
     ['Date', formatDateUS(show.date) || show.date || '—'],
     ['Time', formatTime12Hour(show.time) || show.time || '—'],
     ['Label', show.label || '—'],
@@ -799,6 +796,9 @@ function renderArchiveDetails(show){
     ['Crew', crewList],
     ['Entries logged', entries.length]
   ];
+  if(show.deletedAt){
+    rows.splice(1, 0, ['Deleted on', deletedOn]);
+  }
   const entryCountLabel = entries.length
     ? `${entries.length} ${entries.length === 1 ? 'entry' : 'entries'} logged`
     : 'No entries logged';
@@ -824,6 +824,8 @@ function renderArchiveDetails(show){
     const archived = formatDateTime(show.archivedAt);
     const created = formatDateTime(show.createdAt);
     const metaParts = [];
+    const deleted = formatDateTime(show.deletedAt);
+    if(deleted){ metaParts.push(`Deleted ${deleted}`); }
     if(archived){ metaParts.push(`Archived ${archived}`); }
     if(created){ metaParts.push(`Created ${created}`); }
     archiveMeta.textContent = metaParts.join(' • ');
@@ -993,14 +995,10 @@ function onPlanLaunchChange(){
 }
 
 function collectShowHeaderValues(){
-  const crewSelected = showCrewSelect
-    ? Array.from(showCrewSelect.selectedOptions).map(opt => opt.value).filter(Boolean)
-    : [];
   return {
     date: showDate?.value || '',
     time: showTime?.value || '',
     label: showLabel?.value.trim() || '',
-    crew: normalizeNameList(crewSelected),
     leadPilot: leadPilotSelect?.value?.trim() || '',
     monkeyLead: monkeyLeadSelect?.value?.trim() || '',
     notes: showNotes?.value.trim() || ''
@@ -1020,26 +1018,87 @@ function renderShowHeaderDraft(){
   if(showTime){ showTime.value = draft.time || ''; }
   if(showLabel){ showLabel.value = draft.label || ''; }
   if(showNotes){ showNotes.value = draft.notes || ''; }
-  renderCrewOptions(draft.crew || []);
   renderPilotAssignments(draft);
+  ensureShowHeaderValid();
 }
 
 function resetShowHeaderDraft(){
   state.newShowDraft = createEmptyShowDraft();
+  state.showHeaderShowErrors = false;
   renderShowHeaderDraft();
 }
 
 function updateNewShowDraft(field, value){
   const draft = getNewShowDraft();
-  if(field === 'crew'){
-    draft.crew = normalizeNameList(Array.isArray(value) ? value : [value]);
-    return;
-  }
   draft[field] = value;
 }
 
+function handleShowHeaderChange(field, value){
+  updateNewShowDraft(field, value);
+  ensureShowHeaderValid();
+}
+
+function ensureShowHeaderValid(values, options = {}){
+  const {showErrors = false} = options;
+  const headerValues = values || collectShowHeaderValues();
+  if(showErrors){
+    state.showHeaderShowErrors = true;
+  }
+  const shouldShowErrors = state.showHeaderShowErrors || showErrors;
+  const requiredFields = [
+    {key: 'date', label: 'Date', element: showDate},
+    {key: 'time', label: 'Show start time', element: showTime},
+    {key: 'label', label: 'Show label', element: showLabel},
+    {key: 'leadPilot', label: 'Lead pilot', element: leadPilotSelect},
+    {key: 'monkeyLead', label: 'Monkey lead', element: monkeyLeadSelect}
+  ];
+  let firstInvalid = null;
+  requiredFields.forEach(field =>{
+    const rawValue = headerValues[field.key];
+    const normalized = typeof rawValue === 'string' ? rawValue.trim() : rawValue;
+    const isValid = Boolean(normalized);
+    setFieldValidity(field.element, isValid, shouldShowErrors);
+    if(!isValid && !firstInvalid){
+      firstInvalid = field;
+    }
+  });
+  const isValid = !firstInvalid;
+  if(newShowBtn){
+    if(state.isCreatingShow){
+      newShowBtn.disabled = true;
+    }else{
+      newShowBtn.disabled = !isValid;
+    }
+  }
+  if(showErrors && firstInvalid){
+    toast(`${firstInvalid.label} is required`, true);
+    if(firstInvalid.element && typeof firstInvalid.element.focus === 'function'){
+      firstInvalid.element.focus();
+    }
+  }
+  return isValid;
+}
+
+function setFieldValidity(element, isValid, showError){
+  if(!element){
+    return;
+  }
+  if(!showError){
+    element.classList.remove('is-invalid');
+    element.removeAttribute('aria-invalid');
+    return;
+  }
+  if(isValid){
+    element.classList.remove('is-invalid');
+    element.removeAttribute('aria-invalid');
+  }else{
+    element.classList.add('is-invalid');
+    element.setAttribute('aria-invalid', 'true');
+  }
+}
+
 function setShowHeaderDisabled(disabled){
-  const controls = [showDate, showTime, showLabel, showNotes, showCrewSelect, leadPilotSelect, monkeyLeadSelect];
+  const controls = [showDate, showTime, showLabel, showNotes, leadPilotSelect, monkeyLeadSelect];
   controls.forEach(control =>{
     if(!control){
       return;
@@ -1068,8 +1127,12 @@ function setNewShowButtonBusy(busy){
   if(!newShowBtn.dataset.originalLabel){
     newShowBtn.dataset.originalLabel = newShowBtn.textContent || 'Add show';
   }
-  newShowBtn.disabled = busy;
   newShowBtn.textContent = busy ? 'Adding…' : newShowBtn.dataset.originalLabel;
+  if(busy){
+    newShowBtn.disabled = true;
+  }else{
+    ensureShowHeaderValid();
+  }
 }
 
 async function onNewShow(){
@@ -1077,8 +1140,12 @@ async function onNewShow(){
   if(state.isCreatingShow){
     return;
   }
-  const previousId = state.currentShowId;
   const headerValues = collectShowHeaderValues();
+  const isValid = ensureShowHeaderValid(headerValues, {showErrors: true});
+  if(!isValid){
+    return;
+  }
+  const previousId = state.currentShowId;
   state.isCreatingShow = true;
   setShowHeaderDisabled(true);
   setNewShowButtonBusy(true);
@@ -1182,6 +1249,42 @@ async function archiveShowNow(showId){
   }
   notifyShowsChanged({showId: state.currentShowId || null});
   toast('Show archived');
+}
+
+async function deleteShow(showId){
+  closeAllShowMenus();
+  const show = state.shows.find(s => s.id === showId);
+  if(!show){
+    toast('Show not found', true);
+    return;
+  }
+  const confirmed = confirm('Delete this show? It will move to the archive and cannot be undone.');
+  if(!confirmed){
+    return;
+  }
+  let archivedPayload = null;
+  try{
+    archivedPayload = await apiRequest(`/api/shows/${showId}`, {method: 'DELETE'});
+  }catch(err){
+    console.error('Failed to delete show', err);
+    toast(err.message || 'Failed to delete show', true);
+    return;
+  }
+  const wasCurrent = state.currentShowId === showId;
+  state.shows = state.shows.filter(s => s.id !== showId);
+  if(wasCurrent){
+    const fallbackId = state.shows[0]?.id || null;
+    setCurrentShow(fallbackId);
+  }else{
+    renderGroups();
+    syncPilotShowSelect();
+  }
+  await loadArchivedShows({silent: true, preserveSelection: true});
+  if(archivedPayload && archivedPayload.id){
+    setCurrentArchivedShow(archivedPayload.id);
+  }
+  notifyShowsChanged({showId: state.currentShowId || null});
+  toast('Show deleted');
 }
 
 async function onAddLine(){
@@ -1395,6 +1498,16 @@ function createShowMenu(show){
     await archiveShowNow(show.id);
   });
   menu.appendChild(archiveBtn);
+  const deleteBtn = document.createElement('button');
+  deleteBtn.type = 'button';
+  deleteBtn.className = 'menu-item danger';
+  deleteBtn.textContent = 'Delete show';
+  deleteBtn.addEventListener('click', async event=>{
+    event.preventDefault();
+    event.stopPropagation();
+    await deleteShow(show.id);
+  });
+  menu.appendChild(deleteBtn);
   wrap.appendChild(btn);
   wrap.appendChild(menu);
   return wrap;
@@ -1905,6 +2018,7 @@ async function onConfigSubmit(event){
     populateStaffSettings();
     renderCrewOptions(getCurrentShow()?.crew || []);
     renderPilotAssignments(getCurrentShow());
+    ensureShowHeaderValid();
     renderOperatorOptions();
     notifyStaffChanged();
   }catch(err){
@@ -2381,7 +2495,8 @@ function normalizeArchivedShow(raw = {}){
     crew,
     entries,
     createdAt: toNumber(raw.createdAt),
-    archivedAt: toNumber(raw.archivedAt)
+    archivedAt: toNumber(raw.archivedAt),
+    deletedAt: toNumber(raw.deletedAt)
   };
   return show;
 }
