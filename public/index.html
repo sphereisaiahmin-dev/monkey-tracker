@@ -153,28 +153,23 @@
       <div class="grid">
         <div class="col-3">
           <label for="showDate">Date</label>
-          <input id="showDate" type="date" autocomplete="off" />
+          <input id="showDate" type="date" autocomplete="off" required />
         </div>
         <div class="col-3">
           <label for="showTime">Show start time</label>
-          <input id="showTime" type="time" />
+          <input id="showTime" type="time" required />
         </div>
         <div class="col-6">
           <label for="showLabel">Show label or number</label>
-          <input id="showLabel" type="text" placeholder="e.g., 7pm Main" />
+          <input id="showLabel" type="text" placeholder="e.g., 7pm Main" required />
         </div>
         <div class="col-6">
-          <label for="showCrew">Crew on duty</label>
-          <select id="showCrew" multiple></select>
-          <p class="help">Hold Ctrl (Cmd on Mac) or Shift to select multiple crew members.</p>
-        </div>
-        <div class="col-3">
           <label for="leadPilot">Lead Pilot</label>
-          <select id="leadPilot"></select>
+          <select id="leadPilot" required></select>
         </div>
-        <div class="col-3">
+        <div class="col-6">
           <label for="monkeyLead">Monkey Lead</label>
-          <select id="monkeyLead"></select>
+          <select id="monkeyLead" required></select>
         </div>
         <div class="col-12">
           <label for="showNotes">Notes for the show</label>

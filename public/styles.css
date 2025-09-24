@@ -465,6 +465,14 @@ input:focus, select:focus, textarea:focus, .btn:focus-visible, .chip-input input
   border-color:var(--focus);
   box-shadow:0 0 0 3px rgba(154, 210, 255, 0.95);
 }
+input.is-invalid, select.is-invalid, textarea.is-invalid{
+  border-color:var(--danger);
+  box-shadow:0 0 0 1px rgba(255, 93, 93, 0.4);
+}
+input.is-invalid:focus, select.is-invalid:focus, textarea.is-invalid:focus{
+  border-color:var(--danger);
+  box-shadow:0 0 0 3px rgba(255, 93, 93, 0.35);
+}
 .btn{
   background:var(--muted);
   color:var(--text);
@@ -569,6 +577,8 @@ details.group > summary .group-summary{
 .show-menu-wrap.open .show-menu{opacity:1; pointer-events:auto; transform:translateY(0);}
 .show-menu .menu-item{background:transparent; border:0; text-align:left; color:var(--text); padding:10px 12px; border-radius:10px; cursor:pointer; font:inherit;}
 .show-menu .menu-item:hover{background:#171b23}
+.show-menu .menu-item.danger{color:var(--danger);}
+.show-menu .menu-item.danger:hover{background:rgba(255,93,93,0.18);}
 
 .menu{position:relative; display:inline-flex; align-items:center;}
 .menu-btn{
