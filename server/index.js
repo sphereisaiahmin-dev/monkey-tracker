@@ -4,6 +4,7 @@ const morgan = require('morgan');
 const { loadConfig, saveConfig } = require('./configStore');
 const { initProvider, getProvider } = require('./storage');
 const { setWebhookConfig, getWebhookStatus, dispatchEntryEvent } = require('./webhookDispatcher');
+const { authenticate, requireRole, loginHandler, registerUserHandler, meHandler } = require('./auth');
 
 async function bootstrap(){
   const app = express();
@@ -31,7 +32,7 @@ async function bootstrap(){
   app.get('/api/health', (req, res)=>{
     res.json({
       status: 'ok',
-      storage: 'sql.js v2',
+      storage: 'PostgreSQL',
       webhook: getWebhookStatus(),
       host: configuredHost,
       port: configuredPort,
@@ -40,11 +41,18 @@ async function bootstrap(){
     });
   });
 
-  app.get('/api/config', (req, res)=>{
+  app.post('/api/auth/login', asyncHandler(loginHandler));
+  app.post('/api/auth/register', authenticate, requireRole(['admin']), asyncHandler(registerUserHandler));
+  app.get('/api/auth/me', authenticate, asyncHandler(meHandler));
+  app.post('/api/auth/logout', authenticate, (req, res)=>{
+    res.status(204).end();
+  });
+
+  app.get('/api/config', authenticate, requireRole(['admin','manager']), (req, res)=>{
     res.json(config);
   });
 
-  app.put('/api/config', asyncHandler(async (req, res)=>{
+  app.put('/api/config', authenticate, requireRole(['admin']), asyncHandler(async (req, res)=>{
     const nextConfig = saveConfig(req.body || {});
     await initProvider(nextConfig);
     setWebhookConfig(nextConfig.webhook);
@@ -60,37 +68,37 @@ async function bootstrap(){
     res.json(config);
   }));
 
-  app.get('/api/staff', asyncHandler(async (req, res)=>{
+  app.get('/api/staff', authenticate, asyncHandler(async (req, res)=>{
     const provider = getProvider();
     const staff = await provider.getStaff();
     res.json(staff);
   }));
 
-  app.put('/api/staff', asyncHandler(async (req, res)=>{
+  app.put('/api/staff', authenticate, requireRole(['admin','manager']), asyncHandler(async (req, res)=>{
     const provider = getProvider();
     const staff = await provider.replaceStaff(req.body || {});
     res.json(staff);
   }));
 
-  app.get('/api/shows', asyncHandler(async (req, res)=>{
+  app.get('/api/shows', authenticate, asyncHandler(async (req, res)=>{
     const provider = getProvider();
     const shows = await provider.listShows();
-    res.json({storage: 'sql.js v2', webhook: getWebhookStatus(), shows});
+    res.json({storage: 'PostgreSQL', webhook: getWebhookStatus(), shows});
   }));
 
-  app.get('/api/shows/archive', asyncHandler(async (req, res)=>{
+  app.get('/api/shows/archive', authenticate, requireRole(['admin','manager']), asyncHandler(async (req, res)=>{
     const provider = getProvider();
     const shows = await provider.listArchivedShows();
     res.json({shows});
   }));
 
-  app.post('/api/shows', asyncHandler(async (req, res)=>{
+  app.post('/api/shows', authenticate, requireRole(['admin','manager']), asyncHandler(async (req, res)=>{
     const provider = getProvider();
     const show = await provider.createShow(req.body || {});
     res.status(201).json(show);
   }));
 
-  app.get('/api/shows/:id', asyncHandler(async (req, res)=>{
+  app.get('/api/shows/:id', authenticate, asyncHandler(async (req, res)=>{
     const provider = getProvider();
     const show = await provider.getShow(req.params.id);
     if(!show){
@@ -100,7 +108,7 @@ async function bootstrap(){
     res.json(show);
   }));
 
-  app.put('/api/shows/:id', asyncHandler(async (req, res)=>{
+  app.put('/api/shows/:id', authenticate, requireRole(['admin','manager']), asyncHandler(async (req, res)=>{
     const provider = getProvider();
     const show = await provider.updateShow(req.params.id, req.body || {});
     if(!show){
@@ -110,7 +118,7 @@ async function bootstrap(){
     res.json(show);
   }));
 
-  app.delete('/api/shows/:id', asyncHandler(async (req, res)=>{
+  app.delete('/api/shows/:id', authenticate, requireRole(['admin']), asyncHandler(async (req, res)=>{
     const provider = getProvider();
     const existing = await provider.getShow(req.params.id);
     if(!existing){
@@ -121,7 +129,7 @@ async function bootstrap(){
     res.status(204).end();
   }));
 
-  app.post('/api/shows/:id/archive', asyncHandler(async (req, res)=>{
+  app.post('/api/shows/:id/archive', authenticate, requireRole(['admin','manager']), asyncHandler(async (req, res)=>{
     const provider = getProvider();
     const archived = await provider.archiveShowNow(req.params.id);
     if(!archived){
@@ -131,7 +139,7 @@ async function bootstrap(){
     res.json(archived);
   }));
 
-  app.post('/api/shows/:id/entries', asyncHandler(async (req, res)=>{
+  app.post('/api/shows/:id/entries', authenticate, requireRole(['admin','manager','pilot']), asyncHandler(async (req, res)=>{
     const provider = getProvider();
     const entry = await provider.addEntry(req.params.id, req.body || {});
     if(!entry){
@@ -143,7 +151,7 @@ async function bootstrap(){
     res.status(201).json(entry);
   }));
 
-  app.put('/api/shows/:id/entries/:entryId', asyncHandler(async (req, res)=>{
+  app.put('/api/shows/:id/entries/:entryId', authenticate, requireRole(['admin','manager']), asyncHandler(async (req, res)=>{
     const provider = getProvider();
     const entry = await provider.updateEntry(req.params.id, req.params.entryId, req.body || {});
     if(!entry){
@@ -155,7 +163,7 @@ async function bootstrap(){
     res.json(entry);
   }));
 
-  app.delete('/api/shows/:id/entries/:entryId', asyncHandler(async (req, res)=>{
+  app.delete('/api/shows/:id/entries/:entryId', authenticate, requireRole(['admin','manager']), asyncHandler(async (req, res)=>{
     const provider = getProvider();
     const result = await provider.deleteEntry(req.params.id, req.params.entryId);
     if(!result){

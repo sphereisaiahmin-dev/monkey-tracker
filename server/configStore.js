@@ -8,8 +8,8 @@ const DEFAULT_CONFIG = {
   host: DEFAULT_HOST,
   port: DEFAULT_PORT,
   unitLabel: 'Drone',
-  sql: {
-    filename: path.join(process.cwd(), 'data', 'monkey-tracker.sqlite')
+  database: {
+    connectionString: process.env.DATABASE_URL || 'postgresql://postgres@localhost:5432/monkey_tracker'
   },
   webhook: {
     enabled: false,
@@ -39,7 +39,7 @@ function loadConfig(){
     return {
       ...DEFAULT_CONFIG,
       ...cleanParsed,
-      sql: {...DEFAULT_CONFIG.sql, ...(cleanParsed.sql || {})},
+      database: {...DEFAULT_CONFIG.database, ...(cleanParsed.database || {})},
       webhook: {...DEFAULT_CONFIG.webhook, ...(cleanParsed.webhook || {})},
       host: cleanParsed.host || DEFAULT_CONFIG.host,
       port: Number.isFinite(parseInt(cleanParsed.port, 10)) ? parseInt(cleanParsed.port, 10) : DEFAULT_CONFIG.port
@@ -55,7 +55,7 @@ function saveConfig(config){
   const merged = {
     ...DEFAULT_CONFIG,
     ...config,
-    sql: {...DEFAULT_CONFIG.sql, ...(config.sql || {})},
+    database: {...DEFAULT_CONFIG.database, ...(config.database || {})},
     webhook: {...DEFAULT_CONFIG.webhook, ...(config.webhook || {})}
   };
   delete merged.provider;

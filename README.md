@@ -1,86 +1,128 @@
-# Drone Tracker Web Application
+# Monkey Tracker
 
-This project exposes the **Drone Tracker** interface as a full web application built with Express.js and a modular data layer. The UI is re-engineered from the original `Drone_Tracker_v0.8.5.html` file and now persists show data using a local SQL.js (WebAssembly) database while optionally forwarding each entry to a configurable webhook.
+Modernised operations dashboard for coordinating drone show crews. The application ships with a React front end, an Express API,
+and a PostgreSQL persistence layer that keeps shows, entries, staff rosters, and user accounts in sync.
 
-## Features
+## Highlights
 
-- Full-featured front-end built with HTML and CSS that retains the original look-and-feel and now surfaces a LAN connection dashboard for quick status checks.
-- Express.js backend API that manages shows, entries, and configuration.
-- SQL.js storage provider (v2) implemented with `sql.js` so no native builds are required. The server creates the database file if it does not exist.
-- Configurable application settings from the in-app settings panel (unit label, webhook delivery settings, and roster management).
-- Optional per-entry webhook export that mirrors the CSV column structure so downstream tables align perfectly with local exports.
-- Archive workspace that retains shows for two months and supports CSV/JSON exports.
-- Entry editor modal with validation consistent with the original workflow.
+- **React SPA** served directly from Express using native ES modules – no build step required.
+- **Role-aware access control** with JWT-based authentication. Admins can invite additional users straight from the API.
+- **PostgreSQL storage** with automatic migrations, daily show limits, per-entry webhook fan-out, and archive retention logic.
+- **Real-time feedback** on storage/webhook status, streamlined show creation, and quick entry capture for pilots and crew.
 
 ## Getting Started
 
-1. Install dependencies at the repository root:
+1. Install dependencies:
 
    ```bash
    npm install
    ```
 
-2. Start the server directly with Node (Express binds to `10.241.211.120` by default so the app is reachable across the LAN):
+2. Provision PostgreSQL (local or remote) and create a database named `monkey_tracker`:
+
+   ```bash
+   sudo service postgresql start
+   sudo -u postgres createdb monkey_tracker
+   ```
+
+   Set `DATABASE_URL` if you are not using the default `postgresql://postgres@localhost:5432/monkey_tracker` connection string.
+
+3. Start the API/server:
 
    ```bash
    node server/index.js
    ```
 
-   > Avoid using `npm start` – the project is configured to be launched directly via Node without npm-run scripts.
+   The server binds to `10.241.211.120:3000` by default. Override with `HOST` / `PORT` environment variables if needed.
 
-   The app runs on [http://10.241.211.120:3000](http://10.241.211.120:3000) out of the box. Set the `HOST` and `PORT` environment variables before launching if you need a different binding (for example `HOST=0.0.0.0 node server/index.js`).
+4. Open the dashboard and sign in using the bootstrapped admin account:
 
-3. Open the settings panel (hamburger button) to adjust the unit label, manage pilot/monkey lead/crew rosters, or to enable the webhook exporter. By default the app uses SQLite-on-WASM and stores data in `data/monkey-tracker.sqlite`.
+   - **Email:** `admin@monkeytracker.local`
+   - **Password:** `changeme123`
+
+   Change the password by creating a new user through `POST /api/auth/register` and disabling the default account.
 
 ## Configuration
 
-The runtime configuration is stored in `config/app-config.json` (created automatically on first run). A template is provided at `config/app-config.example.json` for reference. When settings are saved through the UI the server reloads the storage provider with the new configuration.
+Runtime configuration is stored in `config/app-config.json` and automatically created on first launch. A reference template lives at
+`config/app-config.example.json`.
 
-### Server binding
+Key settings:
 
-- **host** – interface/IP address the Express server should listen on. Defaults to `10.241.211.120` so the dashboard is reachable across the LAN.
-- **port** – TCP port used by the server. Defaults to `3000`.
+- **host / port** – binding for the Express server (defaults to `10.241.211.120:3000`).
+- **database.connectionString** – PostgreSQL connection string. Falls back to `DATABASE_URL`.
+- **webhook** – optional per-entry webhook definition (`enabled`, `url`, `method`, `secret`, `headers`).
 
-> Update these values in `config/app-config.json` (or via environment variables) and restart `node server/index.js` for changes to take effect.
-
-### SQL.js storage
-
-The SQLite database file is stored at `data/monkey-tracker.sqlite`. The directory is created if it does not exist and the file is managed automatically by the server.
-
-### Roster management
-
-The settings panel maintains individual lists for pilots, IATSE monkey leads, and crew. Monkey leads start with Cleo, Bret, Leslie, and Dallas by default and can be customized to match the day's roster.
-
-### Webhook exporter
-
-Enable this option from the settings dialog to stream each saved entry to an external system. The payload mirrors the CSV export columns so the receiving table matches local downloads exactly.
-
-- **Enabled** – toggle to activate per-entry delivery.
-- **Webhook URL** – target endpoint that will receive JSON payloads.
-- **HTTP method** – verb used when sending the webhook (POST or PUT).
-- **Shared secret** – optional secret inserted into the `X-Drone-Webhook-Secret` header.
-- **Additional headers** – newline-delimited list of `Header: value` pairs that will be attached to every request.
+Edits made through the API will persist to disk and refresh the storage provider without restarting the server.
 
 ## API Overview
 
-The Express backend exposes the following endpoints (all JSON):
+All JSON endpoints require authentication unless noted.
 
-- `GET /api/config` / `PUT /api/config` – read or update application configuration (SQL.js settings + webhook configuration).
-- `GET /api/shows` – list shows along with the active storage label and webhook status.
-- `POST /api/shows` – create a new show.
-- `GET /api/shows/:id` – retrieve a single show.
-- `PUT /api/shows/:id` – update show metadata.
-- `DELETE /api/shows/:id` – remove a show.
-- `POST /api/shows/:id/entries` – add an entry to a show.
-- `PUT /api/shows/:id/entries/:entryId` – update an entry.
-- `DELETE /api/shows/:id/entries/:entryId` – delete an entry.
+| Method & Path | Description | Required Role |
+| --- | --- | --- |
+| `POST /api/auth/login` | Exchange credentials for a JWT | Public |
+| `GET /api/auth/me` | Return the current user profile | Any authenticated user |
+| `POST /api/auth/register` | Invite a new user (email, name, password, role) | Admin |
+| `GET /api/health` | Health probe with storage + webhook status | Public |
+| `GET /api/shows` | List active shows | Viewer / Pilot / Manager / Admin |
+| `POST /api/shows` | Create a show | Manager / Admin |
+| `GET /api/shows/:id` | Retrieve show detail | Any authenticated user |
+| `PUT /api/shows/:id` | Update show metadata | Manager / Admin |
+| `DELETE /api/shows/:id` | Remove a show | Admin |
+| `POST /api/shows/:id/archive` | Archive a show immediately | Manager / Admin |
+| `POST /api/shows/:id/entries` | Create a show entry | Pilot / Manager / Admin |
+| `PUT /api/shows/:id/entries/:entryId` | Update an entry | Manager / Admin |
+| `DELETE /api/shows/:id/entries/:entryId` | Delete an entry | Manager / Admin |
+| `GET /api/staff` | Retrieve crew, pilot, and monkey lead rosters | Any authenticated user |
+| `PUT /api/staff` | Replace the roster lists | Manager / Admin |
+| `GET /api/shows/archive` | List archived shows | Manager / Admin |
+
+Responses include webhook status metadata to keep operators informed about integrations.
+
+## Authentication & Roles
+
+Tokens are issued as JWTs and must be supplied via the `Authorization: Bearer <token>` header. Three built-in roles:
+
+- **admin** – full control over configuration, roster, shows, entries, and user management.
+- **manager** – manage shows/entries/rosters but cannot delete shows or invite users.
+- **pilot** – capture entries for assigned shows.
+- **viewer** – read-only access to shows.
+
+The default admin user is seeded automatically during the first migration. Use the registration endpoint to provision additional
+accounts and rotate credentials.
+
+## Front-end Overview
+
+The React interface emphasises speed and clarity:
+
+- One-click navigation between shows with crew and entry counts.
+- Inline editing of show metadata with automatic validation.
+- Entry composer that adapts the form when a show aborts/no-launch is selected.
+- Real-time toasts for success/failure feedback and live webhook/storage badges in the header.
+
+Static assets reside in `public/` and are served as ES modules – no bundler required.
 
 ## Development Notes
 
-- The project uses ES modules in the front-end (`public/app.js`) and CommonJS on the server.
-- Static assets are served from the `public/` directory.
-- `config/app-config.json` and `data/` are ignored by Git so that environment-specific configuration and data files stay local.
+- `server/storage/postgresProvider.js` manages migrations, archive retention, and staff seeding.
+- Webhook dispatch is unchanged and continues to mirror the CSV export structure.
+- Scripts in `scripts/` assume a PostgreSQL backend; ensure `DATABASE_URL` is set before running automation.
 
-## Original Asset
+## Testing
 
-The original standalone HTML file is kept at `Drone_Tracker_v0.8.5.html` for reference.
+Run the placeholder test command to verify dependency resolution:
+
+```bash
+npm test
+```
+
+Manual QA steps (recommended):
+
+1. Log in as the default admin.
+2. Create a manager user via `POST /api/auth/register`.
+3. Sign in as the manager and create multiple shows and entries.
+4. Log in as a pilot to confirm entry-only permissions.
+5. Archive a show and confirm it moves to the archived tab.
+
+Enjoy the streamlined monkey tracking experience!

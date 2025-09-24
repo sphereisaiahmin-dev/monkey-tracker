@@ -1,15 +1,10 @@
-const fs = require('fs');
-const path = require('path');
 const { initProvider } = require('../server/storage');
 
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
 
 async function main(){
-  const dbPath = path.join(process.cwd(), 'data', 'archive-sim.sqlite');
-  await fs.promises.mkdir(path.dirname(dbPath), {recursive: true});
-  await fs.promises.rm(dbPath, {force: true});
-
-  const provider = await initProvider({sql: {filename: dbPath}});
+  const connectionString = process.env.DATABASE_URL || 'postgresql://postgres@localhost:5432/monkey_tracker';
+  const provider = await initProvider({database: {connectionString}});
 
   const totalDays = 70;
   const showsPerDay = 2;
@@ -55,7 +50,6 @@ async function main(){
   console.log(`Expired archived shows detected (should be 0): ${expiredArchived.length}`);
 
   await provider.dispose();
-  await fs.promises.rm(dbPath, {force: true});
 }
 
 main().catch(err =>{

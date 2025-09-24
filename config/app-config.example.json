@@ -2,8 +2,8 @@
   "host": "10.241.211.120",
   "port": 3000,
   "unitLabel": "Drone",
-  "sql": {
-    "filename": "data/monkey-tracker.sqlite"
+  "database": {
+    "connectionString": "postgresql://postgres@localhost:5432/monkey_tracker"
   },
   "webhook": {
     "enabled": false,
