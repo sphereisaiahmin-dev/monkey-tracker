@@ -270,15 +270,17 @@ body.view-pilot .topbar-actions{
   border:1px solid var(--border);
   border-radius:var(--radius);
   padding:16px;
-  display:flex;
-  flex-direction:column;
+  display:grid;
   gap:14px;
+  grid-template-columns:repeat(auto-fit, minmax(320px, 1fr));
+  align-items:stretch;
 }
 .archive-entries-header{
   display:flex;
   align-items:center;
   justify-content:space-between;
   gap:12px;
+  grid-column:1 / -1;
 }
 .archive-entries-header h3{
   margin:0;
@@ -299,6 +301,7 @@ body.view-pilot .topbar-actions{
   display:flex;
   flex-direction:column;
   gap:12px;
+  height:100%;
 }
 .archive-entry-header{
   display:flex;
@@ -384,6 +387,7 @@ body.view-pilot .topbar-actions{
   margin:0;
   font-size:14px;
   color:var(--text-dim);
+  grid-column:1 / -1;
 }
 .archive-entry.status-completed{border-color:rgba(31,198,122,.25);}
 .archive-actions{margin-top:16px;justify-content:flex-start;}
@@ -420,12 +424,13 @@ body.view-pilot .topbar-actions{
   grid-template-columns: repeat(12, 1fr);
 }
 .col-12{grid-column:span 12}
+.col-8{grid-column:span 8}
 .col-6{grid-column:span 6}
 .col-4{grid-column:span 4}
 .col-3{grid-column:span 3}
 .col-2{grid-column:span 2}
 @media (max-width:900px){
-  .col-6,.col-4,.col-3,.col-2{grid-column:span 12}
+  .col-8,.col-6,.col-4,.col-3,.col-2{grid-column:span 12}
 }
 label{font-size:12px;color:var(--text-dim);display:block;margin:4px 0 6px}
 input, select, textarea{
@@ -725,6 +730,7 @@ summary::-webkit-details-marker{display:none}
 .sr-only{position:absolute;left:-10000px;top:auto;width:1px;height:1px;overflow:hidden}
 
 #configMessage{min-height:20px}
+#webhookConfigure{margin-top:12px;min-width:180px}
 
 .webhook-preview{
   margin-top:12px;

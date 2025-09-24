@@ -127,6 +127,11 @@ const webhookMethod = el('webhookMethod');
 const webhookSecret = el('webhookSecret');
 const webhookHeaders = el('webhookHeaders');
 const webhookPreview = el('webhookPreview');
+const webhookConfigureBtn = el('webhookConfigure');
+const webhookModal = el('webhookModal');
+const closeWebhookModalBtn = el('closeWebhookModal');
+const webhookForm = el('webhookForm');
+const webhookCancelBtn = el('webhookCancel');
 const roleHomeBtn = el('roleHome');
 const viewBadge = el('viewBadge');
 const chooseLeadBtn = el('chooseLead');
@@ -153,6 +158,7 @@ const monkeyLeadListInput = el('monkeyLeadList');
 const ADMIN_PIN = '4206';
 let adminUnlocked = false;
 let currentConfigSection = 'lead';
+let webhookModalSnapshot = null;
 
 if(configPanel){
   configPanel.setAttribute('aria-hidden', 'true');
@@ -285,6 +291,7 @@ function initUI(){
       closeAllShowMenus();
       toggleConfig(false);
       closeEditModal();
+      closeWebhookModal({restore: true});
     }
   });
 
@@ -295,6 +302,12 @@ function initUI(){
     webhookEnabled.addEventListener('change', ()=>{
       syncWebhookFields();
       updateWebhookPreview();
+      updateWebhookConfigureVisibility();
+      if(webhookEnabled.checked){
+        openWebhookModal();
+      }else{
+        closeWebhookModal();
+      }
     });
   }
   if(webhookUrl){
@@ -315,6 +328,21 @@ function initUI(){
   if(webhookHeaders){
     webhookHeaders.addEventListener('input', ()=>{
       updateWebhookPreview();
+    });
+  }
+  if(webhookConfigureBtn){
+    webhookConfigureBtn.addEventListener('click', ()=> openWebhookModal());
+  }
+  if(closeWebhookModalBtn){
+    closeWebhookModalBtn.addEventListener('click', ()=> closeWebhookModal({restore: true}));
+  }
+  if(webhookCancelBtn){
+    webhookCancelBtn.addEventListener('click', ()=> closeWebhookModal({restore: true}));
+  }
+  if(webhookForm){
+    webhookForm.addEventListener('submit', event=>{
+      event.preventDefault();
+      saveWebhookModal();
     });
   }
   if(refreshShowsBtn){
@@ -359,16 +387,10 @@ async function loadConfig(){
   appTitle.textContent = state.unitLabel;
   unitLabelEl.textContent = state.unitLabel;
   unitLabelSelect.value = state.unitLabel;
-  if(webhookEnabled){ webhookEnabled.checked = state.webhookConfig.enabled; }
-  if(webhookUrl){ webhookUrl.value = state.webhookConfig.url; }
-  if(webhookMethod){ webhookMethod.value = state.webhookConfig.method; }
-  if(webhookSecret){ webhookSecret.value = state.webhookConfig.secret; }
-  if(webhookHeaders){ webhookHeaders.value = state.webhookConfig.headersText; }
   setLanAddress();
   setProviderBadge(state.storageLabel);
   setWebhookBadge(state.webhookStatus);
-  syncWebhookFields();
-  updateWebhookPreview();
+  refreshWebhookUi();
 }
 
 async function loadStaff(){
@@ -1919,8 +1941,7 @@ async function onConfigSubmit(event){
     setProviderBadge(state.storageLabel);
     setWebhookBadge(state.webhookStatus);
     populateUnitOptions();
-    syncWebhookFields();
-    updateWebhookPreview();
+    refreshWebhookUi();
     updateConnectionIndicator('loading');
     await loadShows();
     setCurrentShow(state.currentShowId || null);
@@ -2131,6 +2152,82 @@ function parseHeadersText(value){
       return name ? {name, value: headerValue} : null;
     })
     .filter(Boolean);
+}
+
+function updateWebhookConfigureVisibility(){
+  if(!webhookConfigureBtn){
+    return;
+  }
+  const shouldShow = Boolean(webhookEnabled && webhookEnabled.checked);
+  webhookConfigureBtn.hidden = !shouldShow;
+  if(shouldShow){
+    webhookConfigureBtn.setAttribute('aria-hidden', 'false');
+  }else{
+    webhookConfigureBtn.setAttribute('aria-hidden', 'true');
+  }
+}
+
+function cloneWebhookConfig(config){
+  return {
+    enabled: Boolean(config?.enabled),
+    url: config?.url || '',
+    method: (config?.method || 'POST').toUpperCase(),
+    secret: config?.secret || '',
+    headersText: config?.headersText || ''
+  };
+}
+
+function refreshWebhookUi(){
+  const config = state.webhookConfig || {};
+  if(webhookEnabled){ webhookEnabled.checked = Boolean(config.enabled); }
+  if(webhookUrl){ webhookUrl.value = config.url || ''; }
+  if(webhookMethod){ webhookMethod.value = (config.method || 'POST').toUpperCase(); }
+  if(webhookSecret){ webhookSecret.value = config.secret || ''; }
+  if(webhookHeaders){ webhookHeaders.value = config.headersText || ''; }
+  syncWebhookFields();
+  updateWebhookPreview();
+  updateWebhookConfigureVisibility();
+}
+
+function openWebhookModal(){
+  if(!webhookModal){
+    return;
+  }
+  if(webhookModal.classList.contains('open')){
+    return;
+  }
+  refreshWebhookUi();
+  webhookModalSnapshot = cloneWebhookConfig(state.webhookConfig);
+  webhookModal.classList.add('open');
+  webhookModal.setAttribute('aria-hidden', 'false');
+  requestAnimationFrame(()=>{
+    if(webhookUrl && !webhookUrl.disabled){
+      webhookUrl.focus();
+      webhookUrl.select?.();
+    }
+  });
+}
+
+function closeWebhookModal(options){
+  if(!webhookModal){
+    return;
+  }
+  const restore = Boolean(options?.restore);
+  const snapshot = webhookModalSnapshot;
+  webhookModalSnapshot = null;
+  if(restore && snapshot){
+    state.webhookConfig = cloneWebhookConfig(snapshot);
+    refreshWebhookUi();
+  }
+  webhookModal.classList.remove('open');
+  webhookModal.setAttribute('aria-hidden', 'true');
+  updateWebhookConfigureVisibility();
+}
+
+function saveWebhookModal(){
+  updateWebhookPreview();
+  closeWebhookModal();
+  toast('Webhook settings staged. Save admin settings to apply.');
 }
 
 function syncWebhookFields(){

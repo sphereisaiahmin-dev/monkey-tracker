@@ -64,18 +64,7 @@
               <span>Enable per-entry webhook dispatch</span>
             </label>
             <p class="help">Send each recorded entry to an external endpoint using the same columns as the CSV export.</p>
-            <label for="webhookUrl">Webhook URL</label>
-            <input id="webhookUrl" type="url" autocomplete="off" placeholder="https://example.com/webhook" />
-            <label for="webhookMethod">HTTP method</label>
-            <select id="webhookMethod">
-              <option>POST</option>
-              <option>PUT</option>
-            </select>
-            <label for="webhookSecret">Shared secret (optional)</label>
-            <input id="webhookSecret" type="text" autocomplete="off" placeholder="Used for X-Drone-Webhook-Secret header" />
-            <label for="webhookHeaders">Additional headers (optional)</label>
-            <textarea id="webhookHeaders" placeholder="One per line, e.g., Authorization: Bearer token"></textarea>
-            <div id="webhookPreview" class="webhook-preview" aria-live="polite"></div>
+            <button id="webhookConfigure" type="button" class="btn ghost" hidden>Config webhook</button>
           </fieldset>
         </section>
         <div class="config-actions row">
@@ -101,7 +90,7 @@
               </span>
               <span class="sr-only">Open settings</span>
             </button>
-            <button id="roleHome" class="btn ghost" type="button">← Choose role</button>
+            <button id="roleHome" class="btn ghost" type="button">← Choose workspace</button>
           </div>
           <img src="./assets/Sphere%20Logo_RGB%20_White.png" alt="Sphere" class="app-logo" />
           <div class="topbar-title">
@@ -307,8 +296,46 @@
 
     <section id="groups" class="view-lead-only"></section>
   </div>
+  </div>
 </div>
-</div>
+
+  <div id="webhookModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="webhookModalTitle" aria-hidden="true">
+    <div class="modal">
+      <div class="toolbar">
+        <h2 id="webhookModalTitle">Webhook settings</h2>
+        <button id="closeWebhookModal" class="btn icon-btn" title="Close webhook settings">✖️</button>
+      </div>
+      <form id="webhookForm" class="grid">
+        <div class="col-12">
+          <label for="webhookUrl">Webhook URL</label>
+          <input id="webhookUrl" type="url" autocomplete="off" placeholder="https://example.com/webhook" />
+        </div>
+        <div class="col-4">
+          <label for="webhookMethod">HTTP method</label>
+          <select id="webhookMethod">
+            <option>POST</option>
+            <option>PUT</option>
+          </select>
+        </div>
+        <div class="col-8">
+          <label for="webhookSecret">Shared secret (optional)</label>
+          <input id="webhookSecret" type="text" autocomplete="off" placeholder="Used for X-Drone-Webhook-Secret header" />
+        </div>
+        <div class="col-12">
+          <label for="webhookHeaders">Additional headers (optional)</label>
+          <textarea id="webhookHeaders" placeholder="One per line, e.g., Authorization: Bearer token"></textarea>
+        </div>
+        <div class="col-12">
+          <div id="webhookPreview" class="webhook-preview" aria-live="polite"></div>
+        </div>
+      </form>
+      <div class="sep"></div>
+      <div class="row" style="justify-content:flex-end;gap:10px;">
+        <button type="button" id="webhookCancel" class="btn ghost">Cancel</button>
+        <button type="submit" form="webhookForm" id="webhookSave" class="btn primary">Save webhook settings</button>
+      </div>
+    </div>
+  </div>
 
   <div id="editModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="editTitle">
     <div class="modal">
