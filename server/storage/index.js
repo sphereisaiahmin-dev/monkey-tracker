@@ -1,4 +1,4 @@
-const SqlProvider = require('./sqlProvider');
+const PostgresProvider = require('./postgresProvider');
 
 let providerInstance = null;
 
@@ -6,7 +6,7 @@ async function initProvider(config){
   if(providerInstance && typeof providerInstance.dispose === 'function'){
     await providerInstance.dispose();
   }
-  providerInstance = new SqlProvider(config.sql);
+  providerInstance = new PostgresProvider(config.database);
   await providerInstance.init();
   return providerInstance;
 }
