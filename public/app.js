@@ -123,10 +123,13 @@ const state = {
   currentArchivedShowId: null,
   selectedArchiveChartShows: [],
   selectedArchiveMetrics: ['launchRate', 'avgDelaySec'],
+  archiveChartSelectionMode: 'range',
   archiveChartFilters: {
     startDate: null,
     endDate: null
   },
+  archiveChartDayGroups: [],
+  activeArchiveDayKey: null,
   webhookConfig: {
     enabled: false,
     url: '',
@@ -240,6 +243,13 @@ const archiveClearShowSelectionBtn = el('archiveClearShowSelection');
 const archiveLoadSampleBtn = el('archiveLoadSample');
 const archiveStatCanvas = el('archiveStatCanvas');
 const archiveStatEmpty = el('archiveStatEmpty');
+const archiveSelectionModeButtons = qsa('[data-archive-mode]');
+const archiveSelectionPanels = qsa('[data-archive-mode-panel]');
+const archiveDayDetail = el('archiveDayDetail');
+const archiveDayDetailTitle = el('archiveDayDetailTitle');
+const archiveDayDetailSubtitle = el('archiveDayDetailSubtitle');
+const archiveDayDetailBody = el('archiveDayDetailBody');
+const archiveDayDetailClose = el('archiveDayDetailClose');
 const refreshArchiveBtn = el('refreshArchive');
 const connectionStatusEl = el('connectionStatus');
 const providerBadge = el('providerBadge');
@@ -356,6 +366,27 @@ function initUI(){
   if(archiveLoadSampleBtn){
     archiveLoadSampleBtn.addEventListener('click', loadSampleArchiveMonth);
   }
+  if(archiveSelectionModeButtons.length){
+    archiveSelectionModeButtons.forEach(button => {
+      button.addEventListener('click', ()=>{
+        const mode = button.dataset.archiveMode;
+        if(mode){
+          setArchiveChartSelectionMode(mode);
+        }
+      });
+    });
+  }
+  if(archiveDayDetailClose){
+    archiveDayDetailClose.addEventListener('click', clearArchiveDayDetail);
+  }
+  if(archiveStatCanvas){
+    archiveStatCanvas.addEventListener('click', onArchiveChartClick);
+  }
+  document.addEventListener('keydown', event => {
+    if(event.key === 'Escape'){
+      clearArchiveDayDetail();
+    }
+  });
   if(roleHomeBtn){
     roleHomeBtn.addEventListener('click', ()=> setView('landing'));
   }
@@ -923,33 +954,54 @@ function renderArchiveStats(show){
 }
 
 function renderArchiveChartControls(){
-  const shows = Array.isArray(state.archivedShows) ? state.archivedShows : [];
+  const shows = Array.isArray(state.archivedShows) ? state.archivedShows.slice() : [];
   const filters = typeof state.archiveChartFilters === 'object' && state.archiveChartFilters
     ? state.archiveChartFilters
     : {startDate: null, endDate: null};
+  const mode = state.archiveChartSelectionMode === 'list' ? 'list' : 'range';
+  state.archiveChartSelectionMode = mode;
+
+  if(archiveSelectionModeButtons.length){
+    archiveSelectionModeButtons.forEach(button => {
+      const isActive = button.dataset.archiveMode === mode;
+      button.classList.toggle('is-active', isActive);
+      button.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+    });
+  }
+  if(archiveSelectionPanels.length){
+    archiveSelectionPanels.forEach(panel => {
+      const panelMode = panel.dataset.archiveModePanel;
+      panel.hidden = panelMode !== mode;
+    });
+  }
+
   if(archiveShowFilterStart){
     archiveShowFilterStart.value = filters.startDate || '';
+    archiveShowFilterStart.disabled = mode !== 'range';
+    archiveShowFilterStart.setAttribute('aria-disabled', archiveShowFilterStart.disabled ? 'true' : 'false');
   }
   if(archiveShowFilterEnd){
     archiveShowFilterEnd.value = filters.endDate || '';
+    archiveShowFilterEnd.disabled = mode !== 'range';
+    archiveShowFilterEnd.setAttribute('aria-disabled', archiveShowFilterEnd.disabled ? 'true' : 'false');
   }
 
-  const filteredShows = getFilteredArchivedShows(shows);
-  const filteredIds = new Set(filteredShows.map(show => show.id));
-  const currentSelection = Array.isArray(state.selectedArchiveChartShows)
-    ? state.selectedArchiveChartShows
-    : [];
-  const prunedSelection = currentSelection.filter(id => filteredIds.has(id));
-  if(prunedSelection.length !== currentSelection.length){
-    state.selectedArchiveChartShows = prunedSelection;
-  }
-  if(!state.selectedArchiveChartShows.length && filteredShows.length){
-    state.selectedArchiveChartShows = filteredShows.map(show => show.id);
+  const listShows = shows.slice().sort((a, b)=> (getShowTimestamp(a) ?? 0) - (getShowTimestamp(b) ?? 0));
+
+  if(mode === 'list'){
+    const availableIds = new Set(listShows.map(show => show.id));
+    let selection = Array.isArray(state.selectedArchiveChartShows)
+      ? state.selectedArchiveChartShows.filter(id => availableIds.has(id))
+      : [];
+    if(!selection.length && listShows.length){
+      selection = listShows.slice(0, Math.min(5, listShows.length)).map(show => show.id);
+    }
+    state.selectedArchiveChartShows = selection;
   }
 
   if(archiveStatShowSelect){
-    if(filteredShows.length){
-      const optionsMarkup = filteredShows.map(show => {
+    if(listShows.length){
+      const optionsMarkup = listShows.map(show => {
         const label = buildArchiveShowLabel(show);
         const id = escapeHtml(show.id || '');
         return `<option value="${id}">${escapeHtml(label)}</option>`;
@@ -959,11 +1011,19 @@ function renderArchiveChartControls(){
       Array.from(archiveStatShowSelect.options).forEach(option => {
         option.selected = selectedSet.has(option.value);
       });
-      archiveStatShowSelect.disabled = false;
+      archiveStatShowSelect.disabled = mode !== 'list';
     }else{
       archiveStatShowSelect.innerHTML = '';
       archiveStatShowSelect.disabled = true;
     }
+    archiveStatShowSelect.setAttribute('aria-disabled', archiveStatShowSelect.disabled ? 'true' : 'false');
+  }
+  if(archiveSelectAllShowsBtn){
+    archiveSelectAllShowsBtn.disabled = mode !== 'list' || !listShows.length;
+  }
+  if(archiveClearShowSelectionBtn){
+    const selectedCount = Array.isArray(state.selectedArchiveChartShows) ? state.selectedArchiveChartShows.length : 0;
+    archiveClearShowSelectionBtn.disabled = mode !== 'list' || selectedCount === 0;
   }
 
   const chartableMetrics = getChartableMetricKeys();
@@ -984,16 +1044,7 @@ function renderArchiveChartControls(){
   }
 
   if(archiveStatEmpty){
-    if(!shows.length){
-      archiveStatEmpty.hidden = false;
-      archiveStatEmpty.textContent = 'Archive data will appear once shows are archived.';
-    }else if(!filteredShows.length){
-      archiveStatEmpty.hidden = false;
-      archiveStatEmpty.textContent = 'No archived shows match the selected date range.';
-    }else if(!state.selectedArchiveMetrics.length){
-      archiveStatEmpty.hidden = false;
-      archiveStatEmpty.textContent = 'Select one or more metrics to render the chart.';
-    }
+    archiveStatEmpty.hidden = true;
   }
 }
 
@@ -1008,26 +1059,56 @@ function renderArchiveChart(){
   const metrics = Array.isArray(state.selectedArchiveMetrics)
     ? state.selectedArchiveMetrics.filter(key => getArchiveMetricDef(key)?.chartable)
     : [];
+  const mode = state.archiveChartSelectionMode === 'list' ? 'list' : 'range';
   const shows = getSelectedArchiveChartShows();
+  const hasAnyShows = Array.isArray(state.archivedShows) && state.archivedShows.length > 0;
+  const rangeMatches = mode === 'range' ? getRangeFilteredArchivedShows(state.archivedShows) : [];
   if(!shows.length || !metrics.length){
     if(archiveChartInstance){
       archiveChartInstance.destroy();
       archiveChartInstance = null;
     }
     if(archiveStatEmpty){
-      const hasShows = Array.isArray(state.archivedShows) && state.archivedShows.length > 0;
-      const message = !hasShows
-        ? 'Archive data will appear once shows are archived.'
-        : (!shows.length
-          ? 'Select one or more shows to render the chart.'
-          : 'Select one or more metrics to render the chart.');
+      let message = 'Archive data will appear once shows are archived.';
+      if(hasAnyShows){
+        if(!metrics.length){
+          message = 'Select one or more metrics to render the chart.';
+        }else if(mode === 'range'){
+          message = rangeMatches.length
+            ? 'Select one or more metrics to render the chart.'
+            : 'No archived shows fall within the selected date range.';
+        }else{
+          message = 'Select one or more shows to render the chart.';
+        }
+      }
       archiveStatEmpty.hidden = false;
       archiveStatEmpty.textContent = message;
     }
+    clearArchiveDayDetail();
+    state.archiveChartDayGroups = [];
+    state.activeArchiveDayKey = null;
     return;
   }
 
-  const chartData = buildArchiveChartData(shows, metrics);
+  const dayGroups = buildArchiveDayGroups(shows);
+  if(!dayGroups.length){
+    if(archiveChartInstance){
+      archiveChartInstance.destroy();
+      archiveChartInstance = null;
+    }
+    if(archiveStatEmpty){
+      archiveStatEmpty.hidden = false;
+      archiveStatEmpty.textContent = mode === 'range'
+        ? 'No archived shows fall within the selected date range.'
+        : 'Selected shows do not have data for the chosen metrics yet.';
+    }
+    clearArchiveDayDetail();
+    state.archiveChartDayGroups = [];
+    state.activeArchiveDayKey = null;
+    return;
+  }
+
+  const chartData = buildArchiveChartData(dayGroups, metrics);
   if(!chartData.datasets.length){
     if(archiveChartInstance){
       archiveChartInstance.destroy();
@@ -1037,11 +1118,19 @@ function renderArchiveChart(){
       archiveStatEmpty.hidden = false;
       archiveStatEmpty.textContent = 'Selected shows do not have data for the chosen metrics yet.';
     }
+    clearArchiveDayDetail();
+    state.archiveChartDayGroups = [];
+    state.activeArchiveDayKey = null;
     return;
   }
 
   if(archiveStatEmpty){
     archiveStatEmpty.hidden = true;
+  }
+
+  state.archiveChartDayGroups = dayGroups;
+  if(state.activeArchiveDayKey && !dayGroups.some(group => group.key === state.activeArchiveDayKey)){
+    state.activeArchiveDayKey = null;
   }
 
   const data = { datasets: chartData.datasets };
@@ -1061,6 +1150,182 @@ function renderArchiveChart(){
 
   const metricLabels = chartData.datasets.map(dataset => dataset.label).join(', ');
   archiveStatCanvas.setAttribute('aria-label', `${metricLabels} over time`);
+  if(state.activeArchiveDayKey){
+    renderArchiveDayDetailByKey(state.activeArchiveDayKey);
+  }else{
+    clearArchiveDayDetail();
+  }
+  highlightArchiveDayPoint(state.activeArchiveDayKey);
+
+  requestAnimationFrame(()=>{
+    archiveChartInstance?.resize();
+  });
+}
+
+function setArchiveChartSelectionMode(mode){
+  const normalized = mode === 'list' ? 'list' : 'range';
+  if(state.archiveChartSelectionMode !== normalized){
+    state.archiveChartSelectionMode = normalized;
+    if(normalized === 'list'){
+      syncArchiveChartSelection();
+    }
+  }
+  renderArchiveChartControls();
+  renderArchiveChart();
+}
+
+function onArchiveChartClick(event){
+  if(!archiveChartInstance){
+    return;
+  }
+  const elements = archiveChartInstance.getElementsAtEventForMode(event, 'nearest', {intersect: true}, false) || [];
+  if(!elements.length){
+    clearArchiveDayDetail();
+    return;
+  }
+  const element = elements[0];
+  const dataset = archiveChartInstance.data?.datasets?.[element.datasetIndex];
+  const dataPoint = dataset?.data?.[element.index];
+  if(!dataPoint || !dataPoint.dayKey){
+    clearArchiveDayDetail();
+    return;
+  }
+  if(state.activeArchiveDayKey === dataPoint.dayKey){
+    clearArchiveDayDetail();
+    return;
+  }
+  showArchiveDayDetail(dataPoint.dayKey);
+  highlightArchiveDayPoint(dataPoint.dayKey, element.datasetIndex, element.index);
+}
+
+function showArchiveDayDetail(dayKey){
+  if(!dayKey){
+    clearArchiveDayDetail();
+    return;
+  }
+  state.activeArchiveDayKey = dayKey;
+  renderArchiveDayDetailByKey(dayKey);
+}
+
+function renderArchiveDayDetailByKey(dayKey){
+  if(!archiveDayDetail){
+    return;
+  }
+  const group = getArchiveDayGroup(dayKey);
+  if(!group){
+    clearArchiveDayDetail();
+    return;
+  }
+  archiveDayDetail.hidden = false;
+  if(archiveDayDetailTitle){
+    archiveDayDetailTitle.textContent = group.label || 'Selected day';
+  }
+  if(archiveDayDetailSubtitle){
+    const count = Array.isArray(group.shows) ? group.shows.length : 0;
+    archiveDayDetailSubtitle.textContent = count === 1 ? '1 show selected' : `${count} shows selected`;
+  }
+  if(!archiveDayDetailBody){
+    return;
+  }
+  const metrics = Array.isArray(state.selectedArchiveMetrics)
+    ? state.selectedArchiveMetrics
+        .map(key => ({key, def: getArchiveMetricDef(key)}))
+        .filter(item => item.def && item.def.chartable)
+    : [];
+  if(!metrics.length){
+    archiveDayDetailBody.innerHTML = '<p class="empty">Select metrics to compare shows for this day.</p>';
+    return;
+  }
+  const headerCells = metrics.map(metric => `<th>${escapeHtml(metric.def.label)}</th>`).join('');
+  const rows = group.shows.map((entry, index) => {
+    const show = entry.show || {};
+    const stats = entry.stats || {};
+    const displayLabel = show.label || `Show ${index + 1}`;
+    const timeLabel = formatArchiveDetailTime(show, entry.timestamp);
+    const metricCells = metrics.map(metric => {
+      const value = metric.def.getValue(stats, show);
+      const formatted = formatMetricValue(metric.def, value);
+      return `<td>${escapeHtml(formatted || '—')}</td>`;
+    }).join('');
+    const timeMarkup = timeLabel ? `<span class="show-time">${escapeHtml(timeLabel)}</span>` : '';
+    return `<tr><td><span class="show-label">${escapeHtml(displayLabel)}</span>${timeMarkup}</td>${metricCells}</tr>`;
+  }).join('');
+  archiveDayDetailBody.innerHTML = `<table><thead><tr><th>Show</th>${headerCells}</tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+function clearArchiveDayDetail(){
+  state.activeArchiveDayKey = null;
+  if(archiveDayDetailTitle){
+    archiveDayDetailTitle.textContent = '';
+  }
+  if(archiveDayDetailSubtitle){
+    archiveDayDetailSubtitle.textContent = '';
+  }
+  if(archiveDayDetailBody){
+    archiveDayDetailBody.innerHTML = '';
+  }
+  if(archiveDayDetail){
+    archiveDayDetail.hidden = true;
+  }
+  highlightArchiveDayPoint(null);
+}
+
+function highlightArchiveDayPoint(dayKey, datasetIndexHint, pointIndexHint){
+  if(!archiveChartInstance){
+    return;
+  }
+  const datasets = archiveChartInstance.data?.datasets || [];
+  let targetDataset = datasetIndexHint ?? -1;
+  let targetIndex = pointIndexHint ?? -1;
+  if(dayKey){
+    if(targetDataset < 0 || targetIndex < 0){
+      targetDataset = datasets.findIndex(dataset => Array.isArray(dataset.data) && dataset.data.some(point => point?.dayKey === dayKey));
+      if(targetDataset >= 0){
+        targetIndex = datasets[targetDataset].data.findIndex(point => point?.dayKey === dayKey);
+      }
+    }
+    if(targetDataset >= 0 && targetIndex >= 0){
+      archiveChartInstance.setActiveElements([{datasetIndex: targetDataset, index: targetIndex}]);
+      if(archiveChartInstance.tooltip && typeof archiveChartInstance.tooltip.setActiveElements === 'function'){
+        archiveChartInstance.tooltip.setActiveElements([], {x: 0, y: 0});
+      }
+      archiveChartInstance.update();
+      return;
+    }
+  }
+  archiveChartInstance.setActiveElements([]);
+  if(archiveChartInstance.tooltip && typeof archiveChartInstance.tooltip.setActiveElements === 'function'){
+    archiveChartInstance.tooltip.setActiveElements([], {x: 0, y: 0});
+  }
+  archiveChartInstance.update();
+}
+
+function getArchiveDayGroup(dayKey){
+  if(!dayKey){
+    return null;
+  }
+  const groups = Array.isArray(state.archiveChartDayGroups) ? state.archiveChartDayGroups : [];
+  return groups.find(group => group?.key === dayKey) || null;
+}
+
+function formatArchiveDetailTime(show, timestamp){
+  if(show && typeof show.time === 'string' && show.time){
+    const formatted = formatTime12Hour(show.time);
+    if(formatted){
+      return formatted;
+    }
+  }
+  if(Number.isFinite(timestamp)){
+    try{
+      return new Date(timestamp).toLocaleTimeString(undefined, {
+        hour: 'numeric',
+        minute: '2-digit'
+      });
+    }catch(err){
+      return '';
+    }
+  }
+  return '';
 }
 
 function onArchiveMetricSelectionChange(){
@@ -1076,6 +1341,9 @@ function onArchiveMetricSelectionChange(){
 
 function onArchiveShowSelectChange(){
   if(!archiveStatShowSelect){
+    return;
+  }
+  if(state.archiveChartSelectionMode !== 'list'){
     return;
   }
   const selected = Array.from(archiveStatShowSelect.selectedOptions || []).map(option => option.value);
@@ -1096,16 +1364,24 @@ function onArchiveDateFilterChange(field, value){
 }
 
 function selectAllFilteredArchiveShows(){
-  const filtered = getFilteredArchivedShows();
-  state.selectedArchiveChartShows = filtered.map(show => show.id);
+  if(state.archiveChartSelectionMode !== 'list'){
+    return;
+  }
+  const shows = Array.isArray(state.archivedShows) ? state.archivedShows.slice() : [];
+  shows.sort((a, b)=> (getShowTimestamp(a) ?? 0) - (getShowTimestamp(b) ?? 0));
+  state.selectedArchiveChartShows = shows.map(show => show.id);
   renderArchiveChartControls();
   renderArchiveChart();
 }
 
 function clearFilteredArchiveSelection(){
+  if(state.archiveChartSelectionMode !== 'list'){
+    return;
+  }
   state.selectedArchiveChartShows = [];
   renderArchiveChartControls();
   renderArchiveChart();
+  clearArchiveDayDetail();
 }
 
 function loadSampleArchiveMonth(){
@@ -1202,12 +1478,12 @@ function getChartableMetricKeys(){
   return Object.keys(ARCHIVE_METRIC_DEFS).filter(key => ARCHIVE_METRIC_DEFS[key]?.chartable);
 }
 
-function getFilteredArchivedShows(shows = state.archivedShows){
+function getRangeFilteredArchivedShows(shows = state.archivedShows){
   const list = Array.isArray(shows) ? shows.slice() : [];
   const filters = state.archiveChartFilters || {};
   const startTs = parseFilterDate(filters.startDate, false);
   const endTs = parseFilterDate(filters.endDate, true);
-  return list.filter(show => {
+  const filtered = list.filter(show => {
     const timestamp = getShowTimestamp(show);
     if(timestamp === null){
       return false;
@@ -1220,6 +1496,8 @@ function getFilteredArchivedShows(shows = state.archivedShows){
     }
     return true;
   });
+  filtered.sort((a, b)=> (getShowTimestamp(a) ?? 0) - (getShowTimestamp(b) ?? 0));
+  return filtered;
 }
 
 function parseFilterDate(value, endOfDay){
@@ -1237,22 +1515,63 @@ function parseFilterDate(value, endOfDay){
 }
 
 function getSelectedArchiveChartShows(){
-  const filtered = getFilteredArchivedShows();
+  const shows = Array.isArray(state.archivedShows) ? state.archivedShows.slice() : [];
+  if(!shows.length){
+    return [];
+  }
+  const mode = state.archiveChartSelectionMode === 'list' ? 'list' : 'range';
+  if(mode === 'range'){
+    return getRangeFilteredArchivedShows(shows);
+  }
   const selectedIds = new Set(Array.isArray(state.selectedArchiveChartShows) ? state.selectedArchiveChartShows : []);
-  const shows = filtered.filter(show => selectedIds.has(show.id));
-  shows.sort((a, b)=> (getShowTimestamp(a) ?? 0) - (getShowTimestamp(b) ?? 0));
-  return shows;
+  if(!selectedIds.size){
+    return [];
+  }
+  const selected = shows.filter(show => selectedIds.has(show.id));
+  selected.sort((a, b)=> (getShowTimestamp(a) ?? 0) - (getShowTimestamp(b) ?? 0));
+  return selected;
 }
 
-function buildArchiveChartData(shows, metrics){
+function buildArchiveDayGroups(shows){
+  const list = Array.isArray(shows) ? shows.slice() : [];
+  const groups = new Map();
+  list.forEach(show => {
+    const timestamp = getShowTimestamp(show);
+    if(!Number.isFinite(timestamp)){
+      return;
+    }
+    const stats = computeArchiveShowStats(show);
+    const dateKey = getShowDateKey(show, timestamp);
+    if(!dateKey){
+      return;
+    }
+    const dayStart = parseFilterDate(dateKey, false);
+    const midpoint = Number.isFinite(dayStart) ? dayStart + 12 * 60 * 60 * 1000 : timestamp;
+    if(!groups.has(dateKey)){
+      groups.set(dateKey, {
+        key: dateKey,
+        timestamp: Number.isFinite(midpoint) ? midpoint : timestamp,
+        dayStart: Number.isFinite(dayStart) ? dayStart : timestamp,
+        label: formatArchiveDayLabel(dateKey, timestamp),
+        shows: [],
+        metricSummaries: {}
+      });
+    }
+    const group = groups.get(dateKey);
+    group.shows.push({ show, stats, timestamp });
+  });
+  const dayGroups = Array.from(groups.values());
+  dayGroups.forEach(group => {
+    group.shows.sort((a, b)=> (a.timestamp ?? 0) - (b.timestamp ?? 0));
+  });
+  dayGroups.sort((a, b)=> (a.timestamp ?? 0) - (b.timestamp ?? 0));
+  return dayGroups;
+}
+
+function buildArchiveChartData(dayGroups, metrics){
   const axes = {};
   const datasets = [];
-  const orderedShows = shows.map(show => ({
-    show,
-    stats: computeArchiveShowStats(show),
-    timestamp: getShowTimestamp(show)
-  })).filter(point => Number.isFinite(point.timestamp));
-  orderedShows.sort((a, b)=> a.timestamp - b.timestamp);
+  const groups = Array.isArray(dayGroups) ? dayGroups : [];
 
   metrics.forEach((metricKey, index) => {
     const metricDef = getArchiveMetricDef(metricKey);
@@ -1270,27 +1589,46 @@ function buildArchiveChartData(shows, metrics){
       label: metricDef.label,
       yAxisID: axisId,
       borderColor: color,
-      backgroundColor: applyAlphaToColor(color, 0.25),
-      tension: 0.28,
-      borderWidth: 2,
-      pointRadius: 4,
-      pointHoverRadius: 6,
+      backgroundColor: applyAlphaToColor(color, 0.35),
+      tension: 0.32,
+      borderWidth: 2.5,
+      pointRadius: 5,
+      pointHoverRadius: 8,
       pointBackgroundColor: color,
-      pointBorderColor: '#0f172a',
+      pointBorderColor: 'rgba(15, 23, 42, 0.92)',
+      pointBorderWidth: 2,
       fill: false,
       spanGaps: true,
       parsing: false,
       archiveMetricDef: metricDef,
       archiveMetricKey: metricKey,
-      data: orderedShows.map(point => {
-        const value = metricDef.getValue(point.stats, point.show);
-        return {
-          x: point.timestamp,
-          y: isValidMetricValue(value) ? Number(value) : null,
-          showId: point.show.id
-        };
-      })
+      data: []
     };
+    groups.forEach(group => {
+      const values = group.shows
+        .map(entry => {
+          const value = metricDef.getValue(entry.stats, entry.show);
+          return isValidMetricValue(value) ? Number(value) : null;
+        })
+        .filter(value => value !== null);
+      const average = values.length
+        ? values.reduce((sum, value)=> sum + value, 0) / values.length
+        : null;
+      if(!group.metricSummaries){
+        group.metricSummaries = {};
+      }
+      group.metricSummaries[metricKey] = {
+        average,
+        count: values.length
+      };
+      dataset.data.push({
+        x: group.timestamp,
+        y: average !== null ? average : null,
+        dayKey: group.key,
+        dayLabel: group.label,
+        showCount: values.length
+      });
+    });
     updateAxisDataExtents(axes[axisId], dataset.data);
     datasets.push(dataset);
   });
@@ -1318,16 +1656,20 @@ function buildArchiveChartOptions(axisDescriptors){
   const scales = {
     x: {
       type: 'time',
-      grid: { color: 'rgba(148, 163, 184, 0.18)' },
+      grid: { color: 'rgba(148, 163, 184, 0.16)' },
       ticks: {
-        color: 'rgba(226, 232, 240, 0.85)',
+        color: 'rgba(241, 245, 249, 0.92)',
         maxRotation: 0,
-        autoSkipPadding: 16
+        autoSkipPadding: 18,
+        font: {
+          weight: '600'
+        }
       },
       time: {
-        tooltipFormat: 'PP p',
+        unit: 'day',
+        round: 'day',
+        tooltipFormat: 'PP',
         displayFormats: {
-          hour: 'MMM d ha',
           day: 'MMM d'
         }
       }
@@ -1345,10 +1687,10 @@ function buildArchiveChartOptions(axisDescriptors){
       position,
       grid: {
         drawOnChartArea: drawGrid,
-        color: drawGrid ? 'rgba(148, 163, 184, 0.18)' : 'rgba(148, 163, 184, 0.08)'
+        color: drawGrid ? 'rgba(148, 163, 184, 0.2)' : 'rgba(71, 85, 105, 0.12)'
       },
       ticks: {
-        color: 'rgba(226, 232, 240, 0.85)',
+        color: 'rgba(224, 231, 255, 0.9)',
         padding: 8,
         callback: value => formatChartAxisTick(descriptor, value)
       },
@@ -1386,7 +1728,7 @@ function buildArchiveChartOptions(axisDescriptors){
         borderColor: 'rgba(59, 130, 246, 0.45)',
         borderWidth: 1,
         callbacks: {
-          title: items => formatArchiveTooltipTitle(items?.[0]?.parsed?.x),
+          title: items => formatArchiveTooltipTitle(items?.[0]),
           label: context => formatArchiveTooltipLabel(context)
         }
       }
@@ -1420,16 +1762,24 @@ function formatChartAxisTick(descriptor, value){
   return formatChartAxisValue({suffix: descriptor.suffix, decimals: descriptor.decimals}, value);
 }
 
-function formatArchiveTooltipTitle(value){
+function formatArchiveTooltipTitle(item){
+  if(!item){
+    return '';
+  }
+  const raw = item.raw || {};
+  if(typeof raw.dayLabel === 'string' && raw.dayLabel){
+    return raw.dayLabel;
+  }
+  const value = Number.isFinite(item.parsed?.x) ? item.parsed.x : (Number.isFinite(raw.x) ? raw.x : null);
   if(!Number.isFinite(value)){
     return '';
   }
   try{
-    return new Date(value).toLocaleString(undefined, {
+    return new Date(value).toLocaleDateString(undefined, {
+      weekday: 'short',
       month: 'short',
       day: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit'
+      year: 'numeric'
     });
   }catch(err){
     return '';
@@ -1444,7 +1794,14 @@ function formatArchiveTooltipLabel(context){
   const def = dataset.archiveMetricDef || null;
   const value = context.parsed?.y;
   const formatted = def ? formatMetricValue(def, value) : (Number.isFinite(value) ? value : '—');
-  return `${dataset.label}: ${formatted}`;
+  const count = Number.isFinite(context.raw?.showCount) ? Number(context.raw.showCount) : 0;
+  let suffix = '';
+  if(count > 1){
+    suffix = ` (avg of ${count} shows)`;
+  }else if(count === 1){
+    suffix = ' (1 show)';
+  }
+  return `${dataset.label}: ${formatted}${suffix}`;
 }
 
 function getMetricAxisId(metricKey, metricDef){
@@ -1737,6 +2094,48 @@ function buildArchiveShowLabel(show){
   return `${date}${time ? ` • ${time}` : ''}${label}`;
 }
 
+function formatArchiveDayLabel(dateKey, fallbackTimestamp){
+  if(typeof dateKey === 'string' && dateKey){
+    const parsed = parseFilterDate(dateKey, false);
+    if(Number.isFinite(parsed)){
+      try{
+        return new Date(parsed).toLocaleDateString(undefined, {
+          weekday: 'short',
+          month: 'short',
+          day: 'numeric',
+          year: 'numeric'
+        });
+      }catch(err){
+        // fall through
+      }
+    }
+  }
+  if(Number.isFinite(fallbackTimestamp)){
+    try{
+      return new Date(fallbackTimestamp).toLocaleDateString(undefined, {
+        weekday: 'short',
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric'
+      });
+    }catch(err){
+      return 'Unknown day';
+    }
+  }
+  return 'Unknown day';
+}
+
+function getShowDateKey(show, fallbackTimestamp){
+  if(show && typeof show.date === 'string' && show.date){
+    return show.date;
+  }
+  const timestamp = Number.isFinite(fallbackTimestamp) ? fallbackTimestamp : getShowTimestamp(show);
+  if(!Number.isFinite(timestamp)){
+    return null;
+  }
+  return formatDateKeyFromTimestamp(timestamp);
+}
+
 function getShowTimestamp(show){
   if(!show){
     return null;
@@ -1761,6 +2160,20 @@ function getShowTimestamp(show){
     }
   }
   return null;
+}
+
+function formatDateKeyFromTimestamp(timestamp){
+  if(!Number.isFinite(timestamp)){
+    return null;
+  }
+  const date = new Date(timestamp);
+  if(Number.isNaN(date.getTime())){
+    return null;
+  }
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 function parseShowDateTime(dateStr, timeStr){
@@ -2797,6 +3210,10 @@ function setView(view){
   }
   if(view === 'archive'){
     renderArchiveSelect();
+    renderArchiveChartControls();
+    renderArchiveChart();
+  }else{
+    clearArchiveDayDetail();
   }
 }
 

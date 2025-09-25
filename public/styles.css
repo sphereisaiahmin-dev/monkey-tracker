@@ -230,7 +230,7 @@ body.view-pilot .topbar-actions{
 .archive-analytics{margin-top:32px;padding:20px;border:1px solid rgba(255,255,255,.12);border-radius:12px;background:rgba(12,14,18,.9);}
 .archive-analytics-header{display:flex;flex-direction:column;gap:4px;margin-bottom:16px;}
 .archive-analytics h3{margin:0;font-size:18px;font-weight:600;color:var(--text);}
-.archive-analytics-controls{display:flex;flex-wrap:wrap;gap:20px;align-items:flex-end;margin-bottom:16px;}
+.archive-analytics-controls{display:flex;flex-wrap:wrap;gap:20px;align-items:flex-start;margin-bottom:16px;}
 .archive-analytics .control-group{display:flex;flex-direction:column;gap:6px;min-width:220px;}
 .archive-analytics .control-group select{min-width:220px;}
 .archive-analytics .control-label{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim);}
@@ -242,9 +242,30 @@ body.view-pilot .topbar-actions{
 .date-range{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
 .date-range input{min-width:140px;}
 .date-range-sep{font-size:16px;color:var(--text-dim);font-weight:600;}
-.archive-chart-wrap{position:relative;min-height:320px;}
-.archive-chart{width:100%;height:100%;min-height:300px;display:block;border:1px solid rgba(255,255,255,.12);border-radius:12px;background:#fff;}
-.archive-chart-wrap .help{margin-top:12px;color:var(--text-dim);}
+.archive-chart-wrap{position:relative;min-height:320px;padding:16px;border-radius:16px;background:linear-gradient(145deg, rgba(15,17,24,.95), rgba(8,10,18,.92));border:1px solid rgba(59,130,246,.18);box-shadow:0 20px 45px rgba(2,6,23,.55);}
+.archive-chart{width:100%;height:100%;min-height:280px;display:block;border-radius:12px;background:radial-gradient(circle at 20% 20%, rgba(59,130,246,.18), transparent 55%), radial-gradient(circle at 80% 30%, rgba(56,189,248,.15), transparent 60%), rgba(9,13,22,.92);border:1px solid rgba(148,163,184,.22);}
+.archive-chart-wrap .help{margin-top:12px;color:rgba(226,232,240,.82);}
+.segmented-control{display:inline-flex;background:rgba(10,12,18,.8);border:1px solid rgba(148,163,184,.25);border-radius:999px;padding:4px;gap:4px;}
+.segmented-option{border:none;background:transparent;color:var(--text-dim);padding:6px 14px;border-radius:999px;font-size:13px;font-weight:600;cursor:pointer;transition:all .2s ease;}
+.segmented-option.is-active{background:linear-gradient(135deg, rgba(59,130,246,.88), rgba(14,165,233,.8));color:#f8fafc;box-shadow:0 10px 25px rgba(37,99,235,.35);}
+.segmented-option:focus-visible{outline:2px solid rgba(125,211,252,.9);outline-offset:2px;}
+.archive-day-detail{position:absolute;top:24px;right:24px;min-width:260px;max-width:360px;background:rgba(15,23,42,.95);border:1px solid rgba(59,130,246,.45);border-radius:14px;box-shadow:0 18px 36px rgba(8,11,19,.6);padding:14px;display:flex;flex-direction:column;gap:12px;z-index:5;}
+.archive-day-detail-header{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;}
+.archive-day-detail-header h4{margin:0;font-size:16px;font-weight:700;color:#e0f2fe;}
+.archive-day-detail-header .help{margin:2px 0 0;color:rgba(148,163,184,.9);}
+.archive-day-detail-body{max-height:220px;overflow:auto;border-top:1px solid rgba(148,163,184,.2);padding-top:10px;display:flex;flex-direction:column;gap:10px;}
+.archive-day-detail table{width:100%;border-collapse:collapse;color:#e2e8f0;font-size:13px;}
+.archive-day-detail th{text-align:left;font-weight:600;padding:4px 0;color:rgba(148,197,255,.95);border-bottom:1px solid rgba(59,130,246,.35);}
+.archive-day-detail td{padding:4px 0;border-bottom:1px solid rgba(148,163,184,.15);}
+.archive-day-detail tr:last-child td{border-bottom:none;}
+.archive-day-detail .show-label{font-weight:600;color:#f1f5f9;display:block;}
+.archive-day-detail .show-time{font-size:11px;color:rgba(148,163,184,.85);}
+.archive-day-detail .empty{color:rgba(148,163,184,.75);font-style:italic;}
+.archive-day-detail .btn.icon-btn{background:rgba(15,23,42,.8);border:1px solid rgba(59,130,246,.35);color:#cbd5f5;padding:4px 8px;border-radius:8px;}
+.archive-day-detail .btn.icon-btn:hover{background:rgba(37,99,235,.35);}
+@media (max-width:900px){
+  .archive-day-detail{position:static;max-width:none;width:100%;margin-top:16px;}
+}
 @media (max-width:960px){
   .archive-stats dl{grid-template-columns:1fr;}
   .archive-analytics-controls{flex-direction:column;align-items:stretch;}
