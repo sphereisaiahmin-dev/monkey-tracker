@@ -149,23 +149,43 @@
         </div>
         <div class="archive-analytics-controls">
           <div class="control-group">
-            <label for="archiveStatSelect">Statistic</label>
-            <select id="archiveStatSelect">
+            <label for="archiveStatSelect">Metrics</label>
+            <select id="archiveStatSelect" multiple size="5" aria-describedby="archiveMetricHelp">
               <option value="entriesCount">Entries logged</option>
               <option value="avgDelaySec">Average delay (s)</option>
               <option value="completionRate">Completion rate (%)</option>
               <option value="launchRate">Launch rate (%)</option>
               <option value="abortRate">Abort rate (%)</option>
             </select>
+            <p id="archiveMetricHelp" class="help small">Select one or more metrics to visualise together.</p>
           </div>
           <div class="control-group">
-            <span class="control-label">Shows to plot</span>
-            <div id="archiveStatShowList" class="archive-show-list"></div>
+            <span class="control-label">Date range</span>
+            <div class="date-range" role="group" aria-label="Archive date range">
+              <label class="sr-only" for="archiveShowFilterStart">Start date</label>
+              <input id="archiveShowFilterStart" type="date" />
+              <span class="date-range-sep" aria-hidden="true">→</span>
+              <label class="sr-only" for="archiveShowFilterEnd">End date</label>
+              <input id="archiveShowFilterEnd" type="date" />
+            </div>
+            <p class="help small">Filter the show list using calendar dates.</p>
+          </div>
+          <div class="control-group">
+            <label for="archiveStatShowSelect">Shows to plot</label>
+            <select id="archiveStatShowSelect" multiple size="8" aria-describedby="archiveShowHelp"></select>
+            <div class="control-actions">
+              <button id="archiveSelectAllShows" type="button" class="btn ghost small">Select all in range</button>
+              <button id="archiveClearShowSelection" type="button" class="btn ghost small">Clear</button>
+            </div>
+            <p id="archiveShowHelp" class="help small">Use Shift or Ctrl/Cmd click to choose multiple shows.</p>
+          </div>
+          <div class="control-group control-group-inline">
+            <button id="archiveLoadSample" type="button" class="btn ghost">Load sample month</button>
           </div>
         </div>
         <div class="archive-chart-wrap">
-          <canvas id="archiveStatCanvas" class="archive-chart" height="260" role="img" aria-label="Archived show statistic over time"></canvas>
-          <p id="archiveStatEmpty" class="help">Select one or more shows to render the chart.</p>
+          <canvas id="archiveStatCanvas" class="archive-chart" role="img" aria-label="Archived show statistic over time"></canvas>
+          <p id="archiveStatEmpty" class="help">Select one or more shows and metrics to render the chart.</p>
         </div>
       </div>
     </section>
@@ -375,6 +395,8 @@
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
   <script src="./app.js" type="module"></script>
 </body>
 </html>
