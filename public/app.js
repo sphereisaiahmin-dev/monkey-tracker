@@ -95,6 +95,9 @@ const ARCHIVE_SUMMARY_KEYS = [
   'completionRate'
 ];
 
+const ISSUE_METRIC_PREFIX = 'issue:';
+const issueMetricDefCache = new Map();
+
 function createEmptyShowDraft(){
   return {
     date: '',
@@ -235,7 +238,8 @@ const archiveEmpty = el('archiveEmpty');
 const archiveExportCsvBtn = el('archiveExportCsv');
 const archiveExportJsonBtn = el('archiveExportJson');
 const archiveStats = el('archiveStats');
-const archiveStatSelect = el('archiveStatSelect');
+const archiveMetricButtons = el('archiveMetricButtons');
+const archiveIssueButtons = el('archiveIssueButtons');
 const archiveModeControls = el('archiveModeControls');
 let archiveStatShowSelect = el('archiveStatShowSelect');
 let archiveShowFilterStart = el('archiveShowFilterStart');
@@ -346,8 +350,11 @@ function initUI(){
   if(archiveExportJsonBtn){
     archiveExportJsonBtn.addEventListener('click', ()=> exportSelectedArchive('json'));
   }
-  if(archiveStatSelect){
-    archiveStatSelect.addEventListener('change', onArchiveMetricSelectionChange);
+  if(archiveMetricButtons){
+    archiveMetricButtons.addEventListener('click', onArchiveMetricButtonsClick);
+  }
+  if(archiveIssueButtons){
+    archiveIssueButtons.addEventListener('click', onArchiveMetricButtonsClick);
   }
   if(archiveModeCalendarBtn){
     archiveModeCalendarBtn.addEventListener('click', ()=> setArchiveSelectionMode('calendar'));
@@ -1079,20 +1086,20 @@ function renderArchiveChartControls(){
   }
 
   const chartableMetrics = getChartableMetricKeys();
-  let selectedMetrics = Array.isArray(state.selectedArchiveMetrics)
-    ? state.selectedArchiveMetrics.filter(key => chartableMetrics.includes(key))
+  const issueMetricKeys = getChartableIssueMetricKeys();
+  const selectedMetrics = Array.isArray(state.selectedArchiveMetrics)
+    ? state.selectedArchiveMetrics.filter(key => chartableMetrics.includes(key) || issueMetricKeys.includes(key))
     : [];
-  if(!selectedMetrics.length && chartableMetrics.length){
-    selectedMetrics = chartableMetrics.slice(0, Math.min(2, chartableMetrics.length));
-  }
-  state.selectedArchiveMetrics = selectedMetrics;
+  const effectiveSelection = selectedMetrics.length
+    ? Array.from(new Set(selectedMetrics))
+    : chartableMetrics.slice(0, Math.min(2, chartableMetrics.length));
+  state.selectedArchiveMetrics = effectiveSelection;
 
-  if(archiveStatSelect){
-    Array.from(archiveStatSelect.options).forEach(option => {
-      option.hidden = !chartableMetrics.includes(option.value);
-      option.selected = state.selectedArchiveMetrics.includes(option.value);
-    });
-    archiveStatSelect.disabled = chartableMetrics.length === 0;
+  if(archiveMetricButtons){
+    renderMetricToggleButtons(archiveMetricButtons, chartableMetrics, 'Archive metrics will appear once data is available.');
+  }
+  if(archiveIssueButtons){
+    renderMetricToggleButtons(archiveIssueButtons, issueMetricKeys, 'Primary issues will populate automatically.');
   }
 
   if(archiveStatEmpty){
@@ -1105,10 +1112,35 @@ function renderArchiveChartControls(){
     }else if(mode === 'shows' && !state.selectedArchiveChartShows.length){
       archiveStatEmpty.hidden = false;
       archiveStatEmpty.textContent = 'Use the show picker to select one or more shows to render the chart.';
-    }else if(!state.selectedArchiveMetrics.length){
+    }else if(!getActiveArchiveMetricKeys().length){
       archiveStatEmpty.hidden = false;
       archiveStatEmpty.textContent = 'Select one or more metrics to render the chart.';
     }
+  }
+}
+
+function renderMetricToggleButtons(container, metricKeys, emptyMessage){
+  if(!container){
+    return;
+  }
+  const selectedSet = new Set(Array.isArray(state.selectedArchiveMetrics) ? state.selectedArchiveMetrics : []);
+  const buttons = (metricKeys || []).map(metricKey => {
+    const def = getArchiveMetricDef(metricKey);
+    if(!def || !def.chartable){
+      return '';
+    }
+    const isSelected = selectedSet.has(metricKey);
+    const label = def.buttonLabel || def.label || metricKey;
+    const classes = `btn metric-toggle${isSelected ? ' is-selected' : ''}`;
+    const safeKey = escapeHtml(metricKey);
+    const safeLabel = escapeHtml(label);
+    return `<button type="button" class="${classes}" data-metric-key="${safeKey}" aria-pressed="${isSelected ? 'true' : 'false'}">${safeLabel}</button>`;
+  }).filter(Boolean);
+  if(buttons.length){
+    container.innerHTML = buttons.join('');
+  }else{
+    const message = emptyMessage || 'Metrics will appear once data is available.';
+    container.innerHTML = `<p class="help small">${escapeHtml(message)}</p>`;
   }
 }
 
@@ -1120,9 +1152,7 @@ function renderArchiveChart(){
   if(!ctx){
     return;
   }
-  const metrics = Array.isArray(state.selectedArchiveMetrics)
-    ? state.selectedArchiveMetrics.filter(key => getArchiveMetricDef(key)?.chartable)
-    : [];
+  const metrics = getActiveArchiveMetricKeys();
   const shows = getSelectedArchiveChartShows();
   if(!shows.length || !metrics.length){
     if(archiveChartInstance){
@@ -1246,9 +1276,7 @@ function renderArchiveDayDetail(day){
   if(!day || !archiveDayDetailContent){
     return;
   }
-  const metrics = Array.isArray(state.selectedArchiveMetrics)
-    ? state.selectedArchiveMetrics.filter(key => getArchiveMetricDef(key)?.chartable)
-    : [];
+  const metrics = getActiveArchiveMetricKeys();
   const showCount = Array.isArray(day.shows) ? day.shows.length : 0;
   const summaryLabel = showCount === 1 ? 'show' : 'shows';
   const summaryLine = showCount
@@ -1343,14 +1371,41 @@ function closeArchiveDayDetail(){
   }
 }
 
-function onArchiveMetricSelectionChange(){
-  if(!archiveStatSelect){
+function onArchiveMetricButtonsClick(event){
+  const target = event?.target ? event.target.closest('button[data-metric-key]') : null;
+  if(!target){
     return;
   }
-  const selected = Array.from(archiveStatSelect.selectedOptions || [])
-    .map(option => option.value)
-    .filter(value => getArchiveMetricDef(value)?.chartable);
-  state.selectedArchiveMetrics = selected;
+  const metricKey = target.getAttribute('data-metric-key');
+  if(!metricKey){
+    return;
+  }
+  toggleArchiveMetric(metricKey);
+}
+
+function toggleArchiveMetric(metricKey){
+  if(!metricKey){
+    return;
+  }
+  const availableMetrics = new Set([
+    ...getChartableMetricKeys(),
+    ...getChartableIssueMetricKeys()
+  ]);
+  if(!availableMetrics.has(metricKey)){
+    return;
+  }
+  const selection = Array.isArray(state.selectedArchiveMetrics)
+    ? state.selectedArchiveMetrics.slice()
+    : [];
+  const index = selection.indexOf(metricKey);
+  if(index >= 0){
+    selection.splice(index, 1);
+  }else{
+    selection.push(metricKey);
+  }
+  state.selectedArchiveMetrics = selection;
+  closeArchiveDayDetail();
+  renderArchiveChartControls();
   renderArchiveChart();
 }
 
@@ -1491,6 +1546,30 @@ function buildSampleEntries(baseDate, offset){
 
 function getChartableMetricKeys(){
   return Object.keys(ARCHIVE_METRIC_DEFS).filter(key => ARCHIVE_METRIC_DEFS[key]?.chartable);
+}
+
+function getChartableIssueMetricKeys(){
+  return PRIMARY_ISSUES.map(issue => getIssueMetricKey(issue));
+}
+
+function getActiveArchiveMetricKeys(){
+  const metrics = Array.isArray(state.selectedArchiveMetrics) ? state.selectedArchiveMetrics : [];
+  return metrics.filter(key => getArchiveMetricDef(key)?.chartable);
+}
+
+function getIssueMetricKey(issue){
+  return `${ISSUE_METRIC_PREFIX}${issue}`;
+}
+
+function isIssueMetricKey(key){
+  return typeof key === 'string' && key.startsWith(ISSUE_METRIC_PREFIX);
+}
+
+function getIssueFromMetricKey(key){
+  if(!isIssueMetricKey(key)){
+    return null;
+  }
+  return key.slice(ISSUE_METRIC_PREFIX.length);
 }
 
 function getFilteredArchivedShows(shows = state.archivedShows){
@@ -1886,9 +1965,7 @@ function formatArchiveTooltipBreakdown(items){
   }
   const showCount = Array.isArray(day.shows) ? day.shows.length : 0;
   const lines = [`Shows logged: ${showCount}`];
-  const metrics = Array.isArray(state.selectedArchiveMetrics)
-    ? state.selectedArchiveMetrics.filter(key => getArchiveMetricDef(key)?.chartable)
-    : [];
+  const metrics = getActiveArchiveMetricKeys();
   metrics.forEach(metricKey => {
     const def = getArchiveMetricDef(metricKey);
     if(!def){
@@ -2100,6 +2177,7 @@ function computeArchiveShowStats(show){
   let abortCount = 0;
   let launchedCount = 0;
   const delayValues = [];
+  const issueCounts = {};
   for(const entry of entries){
     const status = String(entry?.status || '').toLowerCase();
     if(status === 'completed'){
@@ -2115,6 +2193,11 @@ function computeArchiveShowStats(show){
     if(Number.isFinite(entry?.delaySec)){
       delayValues.push(entry.delaySec);
     }
+    const issue = typeof entry?.primaryIssue === 'string' ? entry.primaryIssue.trim() : '';
+    if(issue){
+      const normalized = PRIMARY_ISSUES.includes(issue) ? issue : 'Other';
+      issueCounts[normalized] = (issueCounts[normalized] || 0) + 1;
+    }
   }
   const totalEntries = entries.length;
   const delaySum = delayValues.reduce((sum, value)=> sum + value, 0);
@@ -2123,6 +2206,11 @@ function computeArchiveShowStats(show){
   const completionRate = totalEntries ? (completedCount / totalEntries) * 100 : null;
   const launchRate = totalEntries ? (launchedCount / totalEntries) * 100 : null;
   const abortRate = totalEntries ? (abortCount / totalEntries) * 100 : null;
+  const issueRates = {};
+  PRIMARY_ISSUES.forEach(issue => {
+    const count = issueCounts[issue] || 0;
+    issueRates[issue] = totalEntries ? (count / totalEntries) * 100 : null;
+  });
   return {
     totalEntries,
     completedCount,
@@ -2133,12 +2221,51 @@ function computeArchiveShowStats(show){
     maxDelaySec,
     completionRate,
     launchRate,
-    abortRate
+    abortRate,
+    issueCounts,
+    issueRates
   };
 }
 
 function getArchiveMetricDef(key){
-  return ARCHIVE_METRIC_DEFS[key] || null;
+  if(!key){
+    return null;
+  }
+  if(ARCHIVE_METRIC_DEFS[key]){
+    return ARCHIVE_METRIC_DEFS[key];
+  }
+  if(isIssueMetricKey(key)){
+    if(issueMetricDefCache.has(key)){
+      return issueMetricDefCache.get(key);
+    }
+    const issue = getIssueFromMetricKey(key);
+    if(!issue || !PRIMARY_ISSUES.includes(issue)){
+      return null;
+    }
+    const def = {
+      label: `${issue} frequency (%)`,
+      buttonLabel: issue,
+      suffix: '%',
+      decimals: 0,
+      min: 0,
+      max: 100,
+      chartable: true,
+      getValue: stats => {
+        if(!stats){
+          return null;
+        }
+        const rates = stats.issueRates || null;
+        if(rates && Object.prototype.hasOwnProperty.call(rates, issue)){
+          const value = rates[issue];
+          return Number.isFinite(value) ? value : (value === 0 ? 0 : null);
+        }
+        return null;
+      }
+    };
+    issueMetricDefCache.set(key, def);
+    return def;
+  }
+  return null;
 }
 
 function formatMetricValue(def, value){

@@ -149,15 +149,14 @@
         </div>
         <div class="archive-analytics-controls">
           <div class="control-group">
-            <label for="archiveStatSelect">Metrics</label>
-            <select id="archiveStatSelect" multiple size="5" aria-describedby="archiveMetricHelp">
-              <option value="entriesCount">Entries logged</option>
-              <option value="avgDelaySec">Average delay (s)</option>
-              <option value="completionRate">Completion rate (%)</option>
-              <option value="launchRate">Launch rate (%)</option>
-              <option value="abortRate">Abort rate (%)</option>
-            </select>
-            <p id="archiveMetricHelp" class="help small">Select one or more metrics to visualise together.</p>
+            <span class="control-label">Metrics</span>
+            <div id="archiveMetricButtons" class="metric-toggle-grid" role="group" aria-label="Archive metrics"></div>
+            <p id="archiveMetricHelp" class="help small">Toggle metrics to visualise together.</p>
+          </div>
+          <div class="control-group">
+            <span class="control-label">Primary issues</span>
+            <div id="archiveIssueButtons" class="metric-toggle-grid" role="group" aria-label="Primary issue metrics"></div>
+            <p class="help small">Add issue frequency metrics to the chart.</p>
           </div>
           <div class="control-group control-group-mode">
             <span class="control-label">Populate graph by</span>
