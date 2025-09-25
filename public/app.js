@@ -121,12 +121,16 @@ const state = {
   isCreatingShow: false,
   archivedShows: [],
   currentArchivedShowId: null,
-  selectedArchiveChartShows: [],
+  selectedArchiveChartShows: null,
   selectedArchiveMetrics: ['launchRate', 'avgDelaySec'],
   archiveChartFilters: {
     startDate: null,
     endDate: null
   },
+  archiveSelectionMode: 'calendar',
+  archiveDailyGroups: [],
+  archiveDailyGroupsByKey: {},
+  activeArchiveDayKey: null,
   webhookConfig: {
     enabled: false,
     url: '',
@@ -238,8 +242,16 @@ const archiveShowFilterEnd = el('archiveShowFilterEnd');
 const archiveSelectAllShowsBtn = el('archiveSelectAllShows');
 const archiveClearShowSelectionBtn = el('archiveClearShowSelection');
 const archiveLoadSampleBtn = el('archiveLoadSample');
+const archiveModeCalendarBtn = el('archiveModeCalendar');
+const archiveModeShowsBtn = el('archiveModeShows');
+const archiveCalendarControls = el('archiveCalendarControls');
+const archiveShowControls = el('archiveShowControls');
 const archiveStatCanvas = el('archiveStatCanvas');
 const archiveStatEmpty = el('archiveStatEmpty');
+const archiveDayDetail = el('archiveDayDetail');
+const archiveDayDetailTitle = el('archiveDayDetailTitle');
+const archiveDayDetailContent = el('archiveDayDetailContent');
+const closeArchiveDayDetailBtn = el('closeArchiveDayDetail');
 const refreshArchiveBtn = el('refreshArchive');
 const connectionStatusEl = el('connectionStatus');
 const providerBadge = el('providerBadge');
@@ -341,6 +353,12 @@ function initUI(){
   if(archiveStatShowSelect){
     archiveStatShowSelect.addEventListener('change', onArchiveShowSelectChange);
   }
+  if(archiveModeCalendarBtn){
+    archiveModeCalendarBtn.addEventListener('click', ()=> setArchiveSelectionMode('calendar'));
+  }
+  if(archiveModeShowsBtn){
+    archiveModeShowsBtn.addEventListener('click', ()=> setArchiveSelectionMode('shows'));
+  }
   if(archiveShowFilterStart){
     archiveShowFilterStart.addEventListener('change', ()=> onArchiveDateFilterChange('startDate', archiveShowFilterStart.value));
   }
@@ -355,6 +373,9 @@ function initUI(){
   }
   if(archiveLoadSampleBtn){
     archiveLoadSampleBtn.addEventListener('click', loadSampleArchiveMonth);
+  }
+  if(closeArchiveDayDetailBtn){
+    closeArchiveDayDetailBtn.addEventListener('click', closeArchiveDayDetail);
   }
   if(roleHomeBtn){
     roleHomeBtn.addEventListener('click', ()=> setView('landing'));
@@ -922,7 +943,66 @@ function renderArchiveStats(show){
   }
 }
 
+function getArchiveSelectionMode(){
+  return state.archiveSelectionMode === 'shows' ? 'shows' : 'calendar';
+}
+
+function setArchiveSelectionMode(mode){
+  const nextMode = mode === 'shows' ? 'shows' : 'calendar';
+  if(state.archiveSelectionMode === nextMode){
+    return;
+  }
+  state.archiveSelectionMode = nextMode;
+  if(nextMode === 'calendar'){
+    const filtered = getFilteredArchivedShows();
+    state.selectedArchiveChartShows = filtered.map(show => show.id);
+  }else{
+    const shows = Array.isArray(state.archivedShows) ? state.archivedShows : [];
+    if(Array.isArray(state.selectedArchiveChartShows)){
+      const availableIds = new Set(shows.map(show => show.id));
+      const filtered = state.selectedArchiveChartShows.filter(id => availableIds.has(id));
+      state.selectedArchiveChartShows = filtered.length ? filtered : (shows.length ? null : []);
+    }else{
+      state.selectedArchiveChartShows = shows.length ? null : [];
+    }
+  }
+  closeArchiveDayDetail();
+  renderArchiveChartControls();
+  renderArchiveChart();
+}
+
+function renderArchiveSelectionMode(){
+  const mode = getArchiveSelectionMode();
+  if(archiveModeCalendarBtn){
+    archiveModeCalendarBtn.classList.toggle('is-active', mode === 'calendar');
+    archiveModeCalendarBtn.setAttribute('aria-pressed', mode === 'calendar' ? 'true' : 'false');
+  }
+  if(archiveModeShowsBtn){
+    archiveModeShowsBtn.classList.toggle('is-active', mode === 'shows');
+    archiveModeShowsBtn.setAttribute('aria-pressed', mode === 'shows' ? 'true' : 'false');
+  }
+  if(archiveCalendarControls){
+    archiveCalendarControls.hidden = mode !== 'calendar';
+  }
+  if(archiveShowControls){
+    archiveShowControls.hidden = mode !== 'shows';
+  }
+  if(archiveShowFilterStart){
+    archiveShowFilterStart.disabled = mode !== 'calendar';
+  }
+  if(archiveShowFilterEnd){
+    archiveShowFilterEnd.disabled = mode !== 'calendar';
+  }
+  if(archiveSelectAllShowsBtn){
+    archiveSelectAllShowsBtn.disabled = mode !== 'shows';
+  }
+  if(archiveClearShowSelectionBtn){
+    archiveClearShowSelectionBtn.disabled = mode !== 'shows';
+  }
+}
+
 function renderArchiveChartControls(){
+  renderArchiveSelectionMode();
   const shows = Array.isArray(state.archivedShows) ? state.archivedShows : [];
   const filters = typeof state.archiveChartFilters === 'object' && state.archiveChartFilters
     ? state.archiveChartFilters
@@ -934,22 +1014,27 @@ function renderArchiveChartControls(){
     archiveShowFilterEnd.value = filters.endDate || '';
   }
 
+  const mode = getArchiveSelectionMode();
   const filteredShows = getFilteredArchivedShows(shows);
-  const filteredIds = new Set(filteredShows.map(show => show.id));
-  const currentSelection = Array.isArray(state.selectedArchiveChartShows)
-    ? state.selectedArchiveChartShows
-    : [];
-  const prunedSelection = currentSelection.filter(id => filteredIds.has(id));
-  if(prunedSelection.length !== currentSelection.length){
-    state.selectedArchiveChartShows = prunedSelection;
-  }
-  if(!state.selectedArchiveChartShows.length && filteredShows.length){
+  if(mode === 'calendar'){
     state.selectedArchiveChartShows = filteredShows.map(show => show.id);
+  }else{
+    const availableIds = new Set(shows.map(show => show.id));
+    const isArraySelection = Array.isArray(state.selectedArchiveChartShows);
+    const currentSelection = isArraySelection
+      ? state.selectedArchiveChartShows.filter(id => availableIds.has(id))
+      : [];
+    const shouldAutoPopulate = !isArraySelection;
+    if(!currentSelection.length && shows.length && shouldAutoPopulate){
+      currentSelection.push(...shows.slice(0, Math.min(5, shows.length)).map(show => show.id));
+    }
+    state.selectedArchiveChartShows = Array.from(new Set(currentSelection));
   }
 
   if(archiveStatShowSelect){
-    if(filteredShows.length){
-      const optionsMarkup = filteredShows.map(show => {
+    const optionShows = mode === 'calendar' ? filteredShows : shows;
+    if(optionShows.length){
+      const optionsMarkup = optionShows.map(show => {
         const label = buildArchiveShowLabel(show);
         const id = escapeHtml(show.id || '');
         return `<option value="${id}">${escapeHtml(label)}</option>`;
@@ -959,7 +1044,7 @@ function renderArchiveChartControls(){
       Array.from(archiveStatShowSelect.options).forEach(option => {
         option.selected = selectedSet.has(option.value);
       });
-      archiveStatShowSelect.disabled = false;
+      archiveStatShowSelect.disabled = mode !== 'shows';
     }else{
       archiveStatShowSelect.innerHTML = '';
       archiveStatShowSelect.disabled = true;
@@ -987,9 +1072,12 @@ function renderArchiveChartControls(){
     if(!shows.length){
       archiveStatEmpty.hidden = false;
       archiveStatEmpty.textContent = 'Archive data will appear once shows are archived.';
-    }else if(!filteredShows.length){
+    }else if(mode === 'calendar' && !filteredShows.length){
       archiveStatEmpty.hidden = false;
       archiveStatEmpty.textContent = 'No archived shows match the selected date range.';
+    }else if(mode === 'shows' && !state.selectedArchiveChartShows.length){
+      archiveStatEmpty.hidden = false;
+      archiveStatEmpty.textContent = 'Use the show picker to select one or more shows to render the chart.';
     }else if(!state.selectedArchiveMetrics.length){
       archiveStatEmpty.hidden = false;
       archiveStatEmpty.textContent = 'Select one or more metrics to render the chart.';
@@ -1024,11 +1112,12 @@ function renderArchiveChart(){
       archiveStatEmpty.hidden = false;
       archiveStatEmpty.textContent = message;
     }
+    closeArchiveDayDetail();
     return;
   }
 
   const chartData = buildArchiveChartData(shows, metrics);
-  if(!chartData.datasets.length){
+  if(!chartData.datasets.length || !chartData.dailyGroups.length){
     if(archiveChartInstance){
       archiveChartInstance.destroy();
       archiveChartInstance = null;
@@ -1037,6 +1126,9 @@ function renderArchiveChart(){
       archiveStatEmpty.hidden = false;
       archiveStatEmpty.textContent = 'Selected shows do not have data for the chosen metrics yet.';
     }
+    state.archiveDailyGroups = [];
+    state.archiveDailyGroupsByKey = {};
+    closeArchiveDayDetail();
     return;
   }
 
@@ -1044,8 +1136,21 @@ function renderArchiveChart(){
     archiveStatEmpty.hidden = true;
   }
 
+  state.archiveDailyGroups = chartData.dailyGroups;
+  state.archiveDailyGroupsByKey = Object.fromEntries((chartData.dailyGroups || []).map(group => [group.dateKey, group]));
+  if(state.activeArchiveDayKey){
+    const activeDay = getArchiveDayByKey(state.activeArchiveDayKey);
+    if(activeDay){
+      renderArchiveDayDetail(activeDay);
+    }else{
+      closeArchiveDayDetail();
+    }
+  }
+
   const data = { datasets: chartData.datasets };
   const options = buildArchiveChartOptions(chartData.axes);
+  options.onClick = (event, elements, chart)=> handleArchiveChartClick(event, elements, chart);
+  options.onHover = (event, elements)=> handleArchiveChartHover(event, elements);
 
   if(archiveChartInstance){
     archiveChartInstance.data = data;
@@ -1061,6 +1166,154 @@ function renderArchiveChart(){
 
   const metricLabels = chartData.datasets.map(dataset => dataset.label).join(', ');
   archiveStatCanvas.setAttribute('aria-label', `${metricLabels} over time`);
+}
+
+function handleArchiveChartClick(event, elements, chart){
+  if(!elements || !elements.length){
+    closeArchiveDayDetail();
+    return;
+  }
+  const element = elements[0];
+  if(!chart || !chart.data || !chart.data.datasets){
+    closeArchiveDayDetail();
+    return;
+  }
+  const dataset = chart.data.datasets[element.datasetIndex];
+  const point = dataset?.data?.[element.index];
+  if(!point || !point.dayKey){
+    closeArchiveDayDetail();
+    return;
+  }
+  if(state.activeArchiveDayKey === point.dayKey){
+    closeArchiveDayDetail();
+    return;
+  }
+  const day = getArchiveDayByKey(point.dayKey);
+  if(day){
+    openArchiveDayDetail(day);
+  }else{
+    closeArchiveDayDetail();
+  }
+}
+
+function handleArchiveChartHover(event, elements){
+  const target = event?.native?.target || archiveStatCanvas;
+  if(target && target.style){
+    target.style.cursor = elements && elements.length ? 'pointer' : 'default';
+  }
+}
+
+function openArchiveDayDetail(day){
+  if(!day){
+    closeArchiveDayDetail();
+    return;
+  }
+  state.activeArchiveDayKey = day.dateKey || null;
+  renderArchiveDayDetail(day);
+  if(archiveDayDetail){
+    archiveDayDetail.hidden = false;
+  }
+}
+
+function renderArchiveDayDetail(day){
+  if(!day || !archiveDayDetailContent){
+    return;
+  }
+  const metrics = Array.isArray(state.selectedArchiveMetrics)
+    ? state.selectedArchiveMetrics.filter(key => getArchiveMetricDef(key)?.chartable)
+    : [];
+  const showCount = Array.isArray(day.shows) ? day.shows.length : 0;
+  const summaryLabel = showCount === 1 ? 'show' : 'shows';
+  const summaryLine = showCount
+    ? `Averages from ${showCount} ${summaryLabel}.`
+    : 'No shows recorded for this date yet.';
+  if(archiveDayDetailTitle){
+    archiveDayDetailTitle.textContent = day.displayDate || formatArchiveDayLabel(day.timestamp) || 'Day breakdown';
+  }
+
+  const metricCards = metrics.map(metricKey => {
+    const def = getArchiveMetricDef(metricKey);
+    if(!def){
+      return '';
+    }
+    const summary = day.metrics?.[metricKey] || getOrCreateGroupMetricSummary(day, metricKey, def);
+    const averageText = summary ? formatMetricValue(def, summary.average) : '—';
+    const metaParts = [];
+    if(summary){
+      if(typeof summary.count === 'number'){
+        metaParts.push(`${summary.count} ${summary.count === 1 ? 'value' : 'values'}`);
+      }
+      if(Number.isFinite(summary.min) && Number.isFinite(summary.max) && summary.min !== summary.max){
+        const minText = formatMetricValue(def, summary.min);
+        const maxText = formatMetricValue(def, summary.max);
+        metaParts.push(`Range ${minText} – ${maxText}`);
+      }
+    }
+    const metaText = metaParts.length ? metaParts.join(' • ') : '';
+    return `
+      <div class="archive-day-metric">
+        <h5>${escapeHtml(def.label)}</h5>
+        <div class="value">${escapeHtml(averageText)}</div>
+        ${metaText ? `<div class="meta">${escapeHtml(metaText)}</div>` : ''}
+      </div>
+    `;
+  }).filter(Boolean);
+
+  const metricSection = metricCards.length
+    ? `<div class="archive-day-metrics">${metricCards.join('')}</div>`
+    : `<p class="help small">Select one or more metrics to compare shows.</p>`;
+
+  let tableMarkup = `<p class="help small">Shows for this date will appear here once recorded.</p>`;
+  if(showCount){
+    const headerCells = metrics.map(metricKey => {
+      const def = getArchiveMetricDef(metricKey);
+      return `<th scope="col">${escapeHtml(def?.label || metricKey)}</th>`;
+    }).join('');
+    const bodyRows = day.shows.map(item => {
+      const show = item?.show;
+      if(!show){
+        return '';
+      }
+      const showLabel = escapeHtml(buildArchiveShowLabel(show));
+      const metricCells = metrics.map(metricKey => {
+        const def = getArchiveMetricDef(metricKey);
+        const summary = def ? (day.metrics?.[metricKey] || getOrCreateGroupMetricSummary(day, metricKey, def)) : null;
+        const entry = summary?.valueMap?.[show.id];
+        const valueText = entry ? entry.formatted : '—';
+        return `<td class="metric-cell">${escapeHtml(valueText)}</td>`;
+      }).join('');
+      return `<tr><th scope="row">${showLabel}</th>${metricCells}</tr>`;
+    }).filter(Boolean).join('');
+    tableMarkup = `
+      <table class="archive-day-table">
+        <thead>
+          <tr><th scope="col">Show</th>${headerCells}</tr>
+        </thead>
+        <tbody>
+          ${bodyRows}
+        </tbody>
+      </table>
+    `;
+  }
+
+  archiveDayDetailContent.innerHTML = `
+    <p class="archive-day-summary">${escapeHtml(summaryLine)}</p>
+    ${metricSection}
+    ${tableMarkup}
+  `;
+}
+
+function closeArchiveDayDetail(){
+  state.activeArchiveDayKey = null;
+  if(archiveDayDetail){
+    archiveDayDetail.hidden = true;
+  }
+  if(archiveDayDetailContent){
+    archiveDayDetailContent.innerHTML = '';
+  }
+  if(archiveDayDetailTitle){
+    archiveDayDetailTitle.textContent = 'Day breakdown';
+  }
 }
 
 function onArchiveMetricSelectionChange(){
@@ -1096,14 +1349,25 @@ function onArchiveDateFilterChange(field, value){
 }
 
 function selectAllFilteredArchiveShows(){
-  const filtered = getFilteredArchivedShows();
-  state.selectedArchiveChartShows = filtered.map(show => show.id);
+  if(getArchiveSelectionMode() === 'calendar'){
+    const filtered = getFilteredArchivedShows();
+    state.selectedArchiveChartShows = filtered.map(show => show.id);
+  }else{
+    const shows = Array.isArray(state.archivedShows) ? state.archivedShows : [];
+    state.selectedArchiveChartShows = shows.map(show => show.id);
+  }
+  closeArchiveDayDetail();
   renderArchiveChartControls();
   renderArchiveChart();
 }
 
 function clearFilteredArchiveSelection(){
   state.selectedArchiveChartShows = [];
+  if(getArchiveSelectionMode() === 'calendar'){
+    const filtered = getFilteredArchivedShows();
+    state.selectedArchiveChartShows = filtered.map(show => show.id);
+  }
+  closeArchiveDayDetail();
   renderArchiveChartControls();
   renderArchiveChart();
 }
@@ -1237,22 +1501,23 @@ function parseFilterDate(value, endOfDay){
 }
 
 function getSelectedArchiveChartShows(){
-  const filtered = getFilteredArchivedShows();
+  const mode = getArchiveSelectionMode();
+  const allShows = Array.isArray(state.archivedShows) ? state.archivedShows.slice() : [];
+  if(mode === 'calendar'){
+    const filtered = getFilteredArchivedShows(allShows);
+    filtered.sort((a, b)=> (getShowTimestamp(a) ?? 0) - (getShowTimestamp(b) ?? 0));
+    return filtered;
+  }
   const selectedIds = new Set(Array.isArray(state.selectedArchiveChartShows) ? state.selectedArchiveChartShows : []);
-  const shows = filtered.filter(show => selectedIds.has(show.id));
-  shows.sort((a, b)=> (getShowTimestamp(a) ?? 0) - (getShowTimestamp(b) ?? 0));
-  return shows;
+  const selected = allShows.filter(show => selectedIds.has(show.id));
+  selected.sort((a, b)=> (getShowTimestamp(a) ?? 0) - (getShowTimestamp(b) ?? 0));
+  return selected;
 }
 
 function buildArchiveChartData(shows, metrics){
   const axes = {};
   const datasets = [];
-  const orderedShows = shows.map(show => ({
-    show,
-    stats: computeArchiveShowStats(show),
-    timestamp: getShowTimestamp(show)
-  })).filter(point => Number.isFinite(point.timestamp));
-  orderedShows.sort((a, b)=> a.timestamp - b.timestamp);
+  const dailyGroups = buildArchiveDailyGroups(shows);
 
   metrics.forEach((metricKey, index) => {
     const metricDef = getArchiveMetricDef(metricKey);
@@ -1282,12 +1547,13 @@ function buildArchiveChartData(shows, metrics){
       parsing: false,
       archiveMetricDef: metricDef,
       archiveMetricKey: metricKey,
-      data: orderedShows.map(point => {
-        const value = metricDef.getValue(point.stats, point.show);
+      data: dailyGroups.map(group => {
+        const summary = getOrCreateGroupMetricSummary(group, metricKey, metricDef);
+        const average = summary ? summary.average : null;
         return {
-          x: point.timestamp,
-          y: isValidMetricValue(value) ? Number(value) : null,
-          showId: point.show.id
+          x: group.midpoint,
+          y: isValidMetricValue(average) ? Number(average) : null,
+          dayKey: group.dateKey
         };
       })
     };
@@ -1295,7 +1561,118 @@ function buildArchiveChartData(shows, metrics){
     datasets.push(dataset);
   });
 
-  return {datasets, axes};
+  return {datasets, axes, dailyGroups};
+}
+
+function buildArchiveDailyGroups(shows){
+  const groupsByKey = new Map();
+  const list = Array.isArray(shows) ? shows : [];
+  list.forEach(show => {
+    if(!show){
+      return;
+    }
+    const timestamp = getShowTimestamp(show);
+    if(!Number.isFinite(timestamp)){
+      return;
+    }
+    const dayStart = new Date(timestamp);
+    dayStart.setHours(0, 0, 0, 0);
+    const startTs = dayStart.getTime();
+    const dateKey = dayStart.toISOString().slice(0, 10);
+    let group = groupsByKey.get(dateKey);
+    if(!group){
+      group = {
+        dateKey,
+        timestamp: startTs,
+        midpoint: startTs + 12 * 60 * 60 * 1000,
+        shows: [],
+        metrics: {},
+        displayDate: formatArchiveDayLabel(startTs),
+        totalShows: 0
+      };
+      groupsByKey.set(dateKey, group);
+    }
+    group.shows.push({
+      show,
+      stats: computeArchiveShowStats(show)
+    });
+  });
+  const groups = Array.from(groupsByKey.values());
+  groups.sort((a, b)=> a.timestamp - b.timestamp);
+  groups.forEach(group => {
+    group.totalShows = group.shows.length;
+    if(!group.displayDate){
+      group.displayDate = formatArchiveDayLabel(group.timestamp);
+    }
+  });
+  return groups;
+}
+
+function getOrCreateGroupMetricSummary(group, metricKey, metricDef){
+  if(!group){
+    return null;
+  }
+  if(!group.metrics){
+    group.metrics = {};
+  }
+  if(group.metrics[metricKey]){
+    return group.metrics[metricKey];
+  }
+  const showValues = [];
+  const numericValues = [];
+  (group.shows || []).forEach(item => {
+    const show = item?.show || null;
+    const stats = item?.stats || null;
+    if(!show){
+      return;
+    }
+    const value = metricDef?.getValue ? metricDef.getValue(stats, show) : null;
+    const numeric = isValidMetricValue(value) ? Number(value) : null;
+    const formatted = formatMetricValue(metricDef, numeric);
+    const label = buildArchiveShowLabel(show);
+    const shortLabel = buildArchiveShowShortLabel(show);
+    const entry = {
+      showId: show.id,
+      label,
+      shortLabel,
+      value: numeric,
+      formatted
+    };
+    showValues.push(entry);
+    if(Number.isFinite(numeric)){
+      numericValues.push(numeric);
+    }
+  });
+  const average = numericValues.length
+    ? numericValues.reduce((sum, value) => sum + value, 0) / numericValues.length
+    : null;
+  const min = numericValues.length ? Math.min(...numericValues) : null;
+  const max = numericValues.length ? Math.max(...numericValues) : null;
+  const valueMap = showValues.reduce((acc, entry) => {
+    if(entry?.showId){
+      acc[entry.showId] = entry;
+    }
+    return acc;
+  }, {});
+  const summary = {
+    average,
+    min,
+    max,
+    count: numericValues.length,
+    totalShows: group.shows?.length || 0,
+    showValues,
+    valueMap
+  };
+  group.metrics[metricKey] = summary;
+  return summary;
+}
+
+function getArchiveDayByKey(dayKey){
+  if(!dayKey){
+    return null;
+  }
+  const lookup = state.archiveDailyGroupsByKey || {};
+  return lookup[dayKey] || null;
 }
 
 function updateAxisDataExtents(descriptor, data){
@@ -1386,8 +1763,9 @@ function buildArchiveChartOptions(axisDescriptors){
         borderColor: 'rgba(59, 130, 246, 0.45)',
         borderWidth: 1,
         callbacks: {
-          title: items => formatArchiveTooltipTitle(items?.[0]?.parsed?.x),
-          label: context => formatArchiveTooltipLabel(context)
+          title: items => formatArchiveTooltipTitleFromItems(items),
+          label: context => formatArchiveTooltipLabel(context),
+          afterBody: items => formatArchiveTooltipBreakdown(items)
         }
       }
     },
@@ -1442,9 +1820,71 @@ function formatArchiveTooltipLabel(context){
   }
   const dataset = context.dataset;
   const def = dataset.archiveMetricDef || null;
+  const dayKey = context.raw?.dayKey;
+  if(dayKey && dataset.archiveMetricKey && def){
+    const day = getArchiveDayByKey(dayKey);
+    if(day){
+      const summary = day.metrics?.[dataset.archiveMetricKey]
+        || getOrCreateGroupMetricSummary(day, dataset.archiveMetricKey, def);
+      if(summary){
+        const formattedAvg = formatMetricValue(def, summary.average);
+        return `${dataset.label}: ${formattedAvg}`;
+      }
+    }
+  }
   const value = context.parsed?.y;
   const formatted = def ? formatMetricValue(def, value) : (Number.isFinite(value) ? value : '—');
   return `${dataset.label}: ${formatted}`;
+}
+
+function formatArchiveTooltipTitleFromItems(items){
+  const first = items?.[0];
+  if(first?.raw?.dayKey){
+    const day = getArchiveDayByKey(first.raw.dayKey);
+    if(day){
+      return day.displayDate || formatArchiveDayLabel(day.timestamp);
+    }
+  }
+  return formatArchiveTooltipTitle(first?.parsed?.x);
+}
+
+function formatArchiveTooltipBreakdown(items){
+  const first = items?.[0];
+  if(!first?.raw?.dayKey){
+    return [];
+  }
+  const day = getArchiveDayByKey(first.raw.dayKey);
+  if(!day){
+    return [];
+  }
+  const showCount = Array.isArray(day.shows) ? day.shows.length : 0;
+  const lines = [`Shows logged: ${showCount}`];
+  const metrics = Array.isArray(state.selectedArchiveMetrics)
+    ? state.selectedArchiveMetrics.filter(key => getArchiveMetricDef(key)?.chartable)
+    : [];
+  metrics.forEach(metricKey => {
+    const def = getArchiveMetricDef(metricKey);
+    if(!def){
+      return;
+    }
+    const summary = day.metrics?.[metricKey] || getOrCreateGroupMetricSummary(day, metricKey, def);
+    if(!summary){
+      return;
+    }
+    const pieces = (summary.showValues || [])
+      .map(entry => {
+        const label = entry?.shortLabel || entry?.label || '';
+        if(!label){
+          return null;
+        }
+        return `${label}: ${entry.formatted}`;
+      })
+      .filter(Boolean);
+    if(pieces.length){
+      lines.push(`${def.label} by show: ${pieces.join(' • ')}`);
+    }
+  });
+  return lines;
 }
 
 function getMetricAxisId(metricKey, metricDef){
@@ -1727,6 +2167,21 @@ function formatArchiveChartDate(timestamp){
   }
 }
 
+function formatArchiveDayLabel(timestamp){
+  if(!Number.isFinite(timestamp)){
+    return '';
+  }
+  try{
+    return new Date(timestamp).toLocaleDateString(undefined, {
+      month: 'long',
+      day: 'numeric',
+      year: 'numeric'
+    });
+  }catch(err){
+    return '';
+  }
+}
+
 function buildArchiveShowLabel(show){
   if(!show){
     return '';
@@ -1735,6 +2190,24 @@ function buildArchiveShowLabel(show){
   const time = formatTime12Hour(show.time) || '';
   const label = show.label ? ` • ${show.label}` : '';
   return `${date}${time ? ` • ${time}` : ''}${label}`;
+}
+
+function buildArchiveShowShortLabel(show){
+  if(!show){
+    return '';
+  }
+  const label = typeof show.label === 'string' ? show.label.trim() : '';
+  const time = formatTime12Hour(show.time) || '';
+  if(label && time){
+    return `${time} • ${label}`;
+  }
+  if(label){
+    return label;
+  }
+  if(time){
+    return time;
+  }
+  return 'Show';
 }
 
 function getShowTimestamp(show){
@@ -1782,20 +2255,22 @@ function isValidMetricValue(value){
 }
 
 function syncArchiveChartSelection(){
+  const mode = getArchiveSelectionMode();
   const shows = Array.isArray(state.archivedShows) ? state.archivedShows : [];
-  const existing = Array.isArray(state.selectedArchiveChartShows) ? state.selectedArchiveChartShows : [];
-  const available = new Set(shows.map(show => show.id));
-  const nextSelection = existing.filter(id => available.has(id));
-  if(!nextSelection.length && shows.length){
-    const defaultShows = shows.slice(0, Math.min(5, shows.length));
-    defaultShows.forEach(show => {
-      if(show && !nextSelection.includes(show.id)){
-        nextSelection.push(show.id);
-      }
-    });
+  if(mode === 'calendar'){
+    const filtered = getFilteredArchivedShows(shows);
+    state.selectedArchiveChartShows = filtered.map(show => show.id);
+    return;
   }
-  const unique = Array.from(new Set(nextSelection));
-  state.selectedArchiveChartShows = unique;
+  if(!Array.isArray(state.selectedArchiveChartShows)){
+    state.selectedArchiveChartShows = shows.length
+      ? shows.slice(0, Math.min(5, shows.length)).map(show => show.id)
+      : [];
+    return;
+  }
+  const available = new Set(shows.map(show => show.id));
+  const nextSelection = state.selectedArchiveChartShows.filter(id => available.has(id));
+  state.selectedArchiveChartShows = nextSelection;
 }
 
 function exportSelectedArchive(format){

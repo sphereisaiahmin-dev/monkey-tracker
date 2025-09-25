@@ -159,7 +159,15 @@
             </select>
             <p id="archiveMetricHelp" class="help small">Select one or more metrics to visualise together.</p>
           </div>
-          <div class="control-group">
+          <div class="control-group control-group-mode">
+            <span class="control-label">Populate graph by</span>
+            <div class="mode-toggle" role="group" aria-label="Show selection mode">
+              <button id="archiveModeCalendar" type="button" class="btn toggle-btn is-active" data-archive-mode="calendar">Calendar range</button>
+              <button id="archiveModeShows" type="button" class="btn toggle-btn" data-archive-mode="shows">Show picker</button>
+            </div>
+            <p class="help small">Choose how the show list feeds the chart.</p>
+          </div>
+          <div id="archiveCalendarControls" class="control-group">
             <span class="control-label">Date range</span>
             <div class="date-range" role="group" aria-label="Archive date range">
               <label class="sr-only" for="archiveShowFilterStart">Start date</label>
@@ -170,11 +178,11 @@
             </div>
             <p class="help small">Filter the show list using calendar dates.</p>
           </div>
-          <div class="control-group">
+          <div id="archiveShowControls" class="control-group" hidden>
             <label for="archiveStatShowSelect">Shows to plot</label>
             <select id="archiveStatShowSelect" multiple size="8" aria-describedby="archiveShowHelp"></select>
             <div class="control-actions">
-              <button id="archiveSelectAllShows" type="button" class="btn ghost small">Select all in range</button>
+              <button id="archiveSelectAllShows" type="button" class="btn ghost small">Select all</button>
               <button id="archiveClearShowSelection" type="button" class="btn ghost small">Clear</button>
             </div>
             <p id="archiveShowHelp" class="help small">Use Shift or Ctrl/Cmd click to choose multiple shows.</p>
@@ -186,6 +194,15 @@
         <div class="archive-chart-wrap">
           <canvas id="archiveStatCanvas" class="archive-chart" role="img" aria-label="Archived show statistic over time"></canvas>
           <p id="archiveStatEmpty" class="help">Select one or more shows and metrics to render the chart.</p>
+          <div id="archiveDayDetail" class="archive-day-detail" hidden>
+            <div class="archive-day-detail-card" role="dialog" aria-labelledby="archiveDayDetailTitle">
+              <div class="archive-day-detail-header">
+                <h4 id="archiveDayDetailTitle">Day breakdown</h4>
+                <button id="closeArchiveDayDetail" type="button" class="btn icon-btn" aria-label="Close day breakdown">✖️</button>
+              </div>
+              <div id="archiveDayDetailContent" class="archive-day-detail-content"></div>
+            </div>
+          </div>
         </div>
       </div>
     </section>
