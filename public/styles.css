@@ -236,6 +236,9 @@ body.view-pilot .topbar-actions{
 .archive-analytics .control-label{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim);}
 .archive-analytics .control-group select[multiple]{min-height:180px;padding:8px;border-radius:10px;background:rgba(12,15,22,.82);border:1px solid rgba(255,255,255,.18);color:var(--text);}
 .archive-analytics .control-actions{display:flex;gap:10px;flex-wrap:wrap;}
+.archive-populate-toggle{display:flex;gap:10px;flex-wrap:wrap;}
+.archive-populate-toggle .btn.is-active{background:var(--primary);border-color:var(--primary-2);color:#041423;}
+.archive-populate-target>.control-group{margin:0;}
 .control-group-inline{justify-content:flex-start;align-items:flex-end;}
 .help.small{font-size:12px;line-height:1.4;color:var(--text-dim);}
 .btn.small{padding:8px 12px;min-height:32px;font-size:13px;border-radius:10px;}
