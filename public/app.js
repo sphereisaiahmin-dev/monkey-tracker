@@ -127,6 +127,7 @@ const state = {
     startDate: null,
     endDate: null
   },
+  archivePopulateMode: 'range',
   webhookConfig: {
     enabled: false,
     url: '',
@@ -232,11 +233,13 @@ const archiveExportCsvBtn = el('archiveExportCsv');
 const archiveExportJsonBtn = el('archiveExportJson');
 const archiveStats = el('archiveStats');
 const archiveStatSelect = el('archiveStatSelect');
-const archiveStatShowSelect = el('archiveStatShowSelect');
-const archiveShowFilterStart = el('archiveShowFilterStart');
-const archiveShowFilterEnd = el('archiveShowFilterEnd');
-const archiveSelectAllShowsBtn = el('archiveSelectAllShows');
-const archiveClearShowSelectionBtn = el('archiveClearShowSelection');
+const archivePopulateBy = el('archivePopulateBy');
+const archivePopulateTarget = el('archivePopulateTarget');
+let archiveStatShowSelect = null;
+let archiveShowFilterStart = null;
+let archiveShowFilterEnd = null;
+let archiveSelectAllShowsBtn = null;
+let archiveClearShowSelectionBtn = null;
 const archiveLoadSampleBtn = el('archiveLoadSample');
 const archiveStatCanvas = el('archiveStatCanvas');
 const archiveStatEmpty = el('archiveStatEmpty');
@@ -338,21 +341,16 @@ function initUI(){
   if(archiveStatSelect){
     archiveStatSelect.addEventListener('change', onArchiveMetricSelectionChange);
   }
-  if(archiveStatShowSelect){
-    archiveStatShowSelect.addEventListener('change', onArchiveShowSelectChange);
+  if(archivePopulateBy){
+    archivePopulateBy.addEventListener('click', event => {
+      const button = event.target.closest('button[data-mode]');
+      if(!button){
+        return;
+      }
+      setArchivePopulateMode(button.dataset.mode);
+    });
   }
-  if(archiveShowFilterStart){
-    archiveShowFilterStart.addEventListener('change', ()=> onArchiveDateFilterChange('startDate', archiveShowFilterStart.value));
-  }
-  if(archiveShowFilterEnd){
-    archiveShowFilterEnd.addEventListener('change', ()=> onArchiveDateFilterChange('endDate', archiveShowFilterEnd.value));
-  }
-  if(archiveSelectAllShowsBtn){
-    archiveSelectAllShowsBtn.addEventListener('click', selectAllFilteredArchiveShows);
-  }
-  if(archiveClearShowSelectionBtn){
-    archiveClearShowSelectionBtn.addEventListener('click', clearFilteredArchiveSelection);
-  }
+  renderArchivePopulateMode();
   if(archiveLoadSampleBtn){
     archiveLoadSampleBtn.addEventListener('click', loadSampleArchiveMonth);
   }
@@ -920,6 +918,89 @@ function renderArchiveStats(show){
       <p class="help">Statistics will populate once entries are recorded for this show.</p>
     `;
   }
+}
+
+function setArchivePopulateMode(mode){
+  const nextMode = mode === 'shows' ? 'shows' : 'range';
+  if(state.archivePopulateMode === nextMode){
+    return;
+  }
+  state.archivePopulateMode = nextMode;
+  renderArchivePopulateMode();
+}
+
+function renderArchivePopulateMode(){
+  if(archivePopulateBy){
+    Array.from(archivePopulateBy.querySelectorAll('button[data-mode]')).forEach(button => {
+      const isActive = button.dataset.mode === state.archivePopulateMode;
+      button.classList.toggle('is-active', isActive);
+      button.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+    });
+  }
+  if(!archivePopulateTarget){
+    return;
+  }
+  archivePopulateTarget.innerHTML = '';
+  archiveStatShowSelect = null;
+  archiveShowFilterStart = null;
+  archiveShowFilterEnd = null;
+  archiveSelectAllShowsBtn = null;
+  archiveClearShowSelectionBtn = null;
+
+  const mode = state.archivePopulateMode === 'shows' ? 'shows' : 'range';
+  state.archivePopulateMode = mode;
+  if(mode === 'shows'){
+    const group = document.createElement('div');
+    group.className = 'control-group';
+    group.innerHTML = `
+      <label for="archiveStatShowSelect">Shows to plot</label>
+      <select id="archiveStatShowSelect" multiple size="8" aria-describedby="archiveShowHelp"></select>
+      <div class="control-actions">
+        <button id="archiveSelectAllShows" type="button" class="btn ghost small">Select all in range</button>
+        <button id="archiveClearShowSelection" type="button" class="btn ghost small">Clear</button>
+      </div>
+      <p id="archiveShowHelp" class="help small">Use Shift or Ctrl/Cmd click to choose multiple shows.</p>
+    `;
+    archivePopulateTarget.appendChild(group);
+    archiveStatShowSelect = group.querySelector('#archiveStatShowSelect');
+    archiveSelectAllShowsBtn = group.querySelector('#archiveSelectAllShows');
+    archiveClearShowSelectionBtn = group.querySelector('#archiveClearShowSelection');
+    if(archiveStatShowSelect){
+      archiveStatShowSelect.addEventListener('change', onArchiveShowSelectChange);
+    }
+    if(archiveSelectAllShowsBtn){
+      archiveSelectAllShowsBtn.addEventListener('click', selectAllFilteredArchiveShows);
+    }
+    if(archiveClearShowSelectionBtn){
+      archiveClearShowSelectionBtn.addEventListener('click', clearFilteredArchiveSelection);
+    }
+  }else{
+    const group = document.createElement('div');
+    group.className = 'control-group';
+    group.innerHTML = `
+      <span class="control-label">Date range</span>
+      <div class="date-range" role="group" aria-label="Archive date range">
+        <label class="sr-only" for="archiveShowFilterStart">Start date</label>
+        <input id="archiveShowFilterStart" type="date" />
+        <span class="date-range-sep" aria-hidden="true">→</span>
+        <label class="sr-only" for="archiveShowFilterEnd">End date</label>
+        <input id="archiveShowFilterEnd" type="date" />
+      </div>
+      <p class="help small">Filter the show list using calendar dates.</p>
+    `;
+    archivePopulateTarget.appendChild(group);
+    archiveShowFilterStart = group.querySelector('#archiveShowFilterStart');
+    archiveShowFilterEnd = group.querySelector('#archiveShowFilterEnd');
+    if(archiveShowFilterStart){
+      archiveShowFilterStart.addEventListener('change', ()=> onArchiveDateFilterChange('startDate', archiveShowFilterStart.value));
+    }
+    if(archiveShowFilterEnd){
+      archiveShowFilterEnd.addEventListener('change', ()=> onArchiveDateFilterChange('endDate', archiveShowFilterEnd.value));
+    }
+  }
+
+  renderArchiveChartControls();
+  renderArchiveChart();
 }
 
 function renderArchiveChartControls(){
