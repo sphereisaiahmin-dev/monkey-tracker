@@ -167,29 +167,7 @@
             </div>
             <p class="help small">Choose how the show list feeds the chart.</p>
           </div>
-          <div id="archiveCalendarControls" class="control-group">
-            <span class="control-label">Date range</span>
-            <div class="date-range" role="group" aria-label="Archive date range">
-              <label class="sr-only" for="archiveShowFilterStart">Start date</label>
-              <input id="archiveShowFilterStart" type="date" />
-              <span class="date-range-sep" aria-hidden="true">→</span>
-              <label class="sr-only" for="archiveShowFilterEnd">End date</label>
-              <input id="archiveShowFilterEnd" type="date" />
-            </div>
-            <p class="help small">Filter the show list using calendar dates.</p>
-          </div>
-          <div id="archiveShowControls" class="control-group" hidden>
-            <label for="archiveStatShowSelect">Shows to plot</label>
-            <select id="archiveStatShowSelect" multiple size="8" aria-describedby="archiveShowHelp"></select>
-            <div class="control-actions">
-              <button id="archiveSelectAllShows" type="button" class="btn ghost small">Select all</button>
-              <button id="archiveClearShowSelection" type="button" class="btn ghost small">Clear</button>
-            </div>
-            <p id="archiveShowHelp" class="help small">Use Shift or Ctrl/Cmd click to choose multiple shows.</p>
-          </div>
-          <div class="control-group control-group-inline">
-            <button id="archiveLoadSample" type="button" class="btn ghost">Load sample month</button>
-          </div>
+          <div id="archiveModeControls" class="control-group"></div>
         </div>
         <div class="archive-chart-wrap">
           <canvas id="archiveStatCanvas" class="archive-chart" role="img" aria-label="Archived show statistic over time"></canvas>

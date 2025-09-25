@@ -236,16 +236,15 @@ const archiveExportCsvBtn = el('archiveExportCsv');
 const archiveExportJsonBtn = el('archiveExportJson');
 const archiveStats = el('archiveStats');
 const archiveStatSelect = el('archiveStatSelect');
-const archiveStatShowSelect = el('archiveStatShowSelect');
-const archiveShowFilterStart = el('archiveShowFilterStart');
-const archiveShowFilterEnd = el('archiveShowFilterEnd');
-const archiveSelectAllShowsBtn = el('archiveSelectAllShows');
-const archiveClearShowSelectionBtn = el('archiveClearShowSelection');
-const archiveLoadSampleBtn = el('archiveLoadSample');
+const archiveModeControls = el('archiveModeControls');
+let archiveStatShowSelect = el('archiveStatShowSelect');
+let archiveShowFilterStart = el('archiveShowFilterStart');
+let archiveShowFilterEnd = el('archiveShowFilterEnd');
+let archiveSelectAllShowsBtn = el('archiveSelectAllShows');
+let archiveClearShowSelectionBtn = el('archiveClearShowSelection');
+let archiveLoadSampleBtn = el('archiveLoadSample');
 const archiveModeCalendarBtn = el('archiveModeCalendar');
 const archiveModeShowsBtn = el('archiveModeShows');
-const archiveCalendarControls = el('archiveCalendarControls');
-const archiveShowControls = el('archiveShowControls');
 const archiveStatCanvas = el('archiveStatCanvas');
 const archiveStatEmpty = el('archiveStatEmpty');
 const archiveDayDetail = el('archiveDayDetail');
@@ -350,29 +349,11 @@ function initUI(){
   if(archiveStatSelect){
     archiveStatSelect.addEventListener('change', onArchiveMetricSelectionChange);
   }
-  if(archiveStatShowSelect){
-    archiveStatShowSelect.addEventListener('change', onArchiveShowSelectChange);
-  }
   if(archiveModeCalendarBtn){
     archiveModeCalendarBtn.addEventListener('click', ()=> setArchiveSelectionMode('calendar'));
   }
   if(archiveModeShowsBtn){
     archiveModeShowsBtn.addEventListener('click', ()=> setArchiveSelectionMode('shows'));
-  }
-  if(archiveShowFilterStart){
-    archiveShowFilterStart.addEventListener('change', ()=> onArchiveDateFilterChange('startDate', archiveShowFilterStart.value));
-  }
-  if(archiveShowFilterEnd){
-    archiveShowFilterEnd.addEventListener('change', ()=> onArchiveDateFilterChange('endDate', archiveShowFilterEnd.value));
-  }
-  if(archiveSelectAllShowsBtn){
-    archiveSelectAllShowsBtn.addEventListener('click', selectAllFilteredArchiveShows);
-  }
-  if(archiveClearShowSelectionBtn){
-    archiveClearShowSelectionBtn.addEventListener('click', clearFilteredArchiveSelection);
-  }
-  if(archiveLoadSampleBtn){
-    archiveLoadSampleBtn.addEventListener('click', loadSampleArchiveMonth);
   }
   if(closeArchiveDayDetailBtn){
     closeArchiveDayDetailBtn.addEventListener('click', closeArchiveDayDetail);
@@ -981,23 +962,69 @@ function renderArchiveSelectionMode(){
     archiveModeShowsBtn.classList.toggle('is-active', mode === 'shows');
     archiveModeShowsBtn.setAttribute('aria-pressed', mode === 'shows' ? 'true' : 'false');
   }
-  if(archiveCalendarControls){
-    archiveCalendarControls.hidden = mode !== 'calendar';
+  if(archiveModeControls){
+    archiveModeControls.className = `control-group archive-mode-${mode}`;
+    archiveModeControls.innerHTML = mode === 'calendar'
+      ? getArchiveCalendarControlsMarkup()
+      : getArchiveShowControlsMarkup();
+    refreshArchiveModeControlRefs();
   }
-  if(archiveShowControls){
-    archiveShowControls.hidden = mode !== 'shows';
-  }
+}
+
+function getArchiveCalendarControlsMarkup(){
+  return `
+    <span class="control-label">Date range</span>
+    <div class="date-range" role="group" aria-label="Archive date range">
+      <label class="sr-only" for="archiveShowFilterStart">Start date</label>
+      <input id="archiveShowFilterStart" type="date" />
+      <span class="date-range-sep" aria-hidden="true">→</span>
+      <label class="sr-only" for="archiveShowFilterEnd">End date</label>
+      <input id="archiveShowFilterEnd" type="date" />
+    </div>
+    <p class="help small">Filter the show list using calendar dates.</p>
+  `;
+}
+
+function getArchiveShowControlsMarkup(){
+  return `
+    <label for="archiveStatShowSelect">Shows to plot</label>
+    <select id="archiveStatShowSelect" multiple size="8" aria-describedby="archiveShowHelp"></select>
+    <div class="control-actions">
+      <button id="archiveSelectAllShows" type="button" class="btn ghost small">Select all</button>
+      <button id="archiveClearShowSelection" type="button" class="btn ghost small">Clear</button>
+    </div>
+    <p id="archiveShowHelp" class="help small">Use Shift or Ctrl/Cmd click to choose multiple shows.</p>
+    <div class="control-group control-group-inline">
+      <button id="archiveLoadSample" type="button" class="btn ghost">Load sample month</button>
+    </div>
+  `;
+}
+
+function refreshArchiveModeControlRefs(){
+  archiveStatShowSelect = el('archiveStatShowSelect');
+  archiveShowFilterStart = el('archiveShowFilterStart');
+  archiveShowFilterEnd = el('archiveShowFilterEnd');
+  archiveSelectAllShowsBtn = el('archiveSelectAllShows');
+  archiveClearShowSelectionBtn = el('archiveClearShowSelection');
+  archiveLoadSampleBtn = el('archiveLoadSample');
+
   if(archiveShowFilterStart){
-    archiveShowFilterStart.disabled = mode !== 'calendar';
+    archiveShowFilterStart.addEventListener('change', ()=> onArchiveDateFilterChange('startDate', archiveShowFilterStart.value));
   }
   if(archiveShowFilterEnd){
-    archiveShowFilterEnd.disabled = mode !== 'calendar';
+    archiveShowFilterEnd.addEventListener('change', ()=> onArchiveDateFilterChange('endDate', archiveShowFilterEnd.value));
+  }
+  if(archiveStatShowSelect){
+    archiveStatShowSelect.addEventListener('change', onArchiveShowSelectChange);
   }
   if(archiveSelectAllShowsBtn){
-    archiveSelectAllShowsBtn.disabled = mode !== 'shows';
+    archiveSelectAllShowsBtn.addEventListener('click', selectAllFilteredArchiveShows);
   }
   if(archiveClearShowSelectionBtn){
-    archiveClearShowSelectionBtn.disabled = mode !== 'shows';
+    archiveClearShowSelectionBtn.addEventListener('click', clearFilteredArchiveSelection);
+  }
+  if(archiveLoadSampleBtn){
+    archiveLoadSampleBtn.addEventListener('click', loadSampleArchiveMonth);
   }
 }
 
