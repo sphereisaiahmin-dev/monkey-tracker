@@ -123,7 +123,7 @@ const state = {
   currentArchivedShowId: null,
   selectedArchiveChartShows: [],
   selectedArchiveMetrics: ['launchRate', 'avgDelaySec'],
-  archiveChartSelectionMode: 'range',
+  archiveChartSelectionMode: null,
   archiveChartFilters: {
     startDate: null,
     endDate: null
@@ -958,12 +958,13 @@ function renderArchiveChartControls(){
   const filters = typeof state.archiveChartFilters === 'object' && state.archiveChartFilters
     ? state.archiveChartFilters
     : {startDate: null, endDate: null};
-  const mode = state.archiveChartSelectionMode === 'list' ? 'list' : 'range';
+  const rawMode = state.archiveChartSelectionMode;
+  const mode = rawMode === 'list' ? 'list' : rawMode === 'range' ? 'range' : null;
   state.archiveChartSelectionMode = mode;
 
   if(archiveSelectionModeButtons.length){
     archiveSelectionModeButtons.forEach(button => {
-      const isActive = button.dataset.archiveMode === mode;
+      const isActive = Boolean(mode) && button.dataset.archiveMode === mode;
       button.classList.toggle('is-active', isActive);
       button.setAttribute('aria-pressed', isActive ? 'true' : 'false');
     });
@@ -971,18 +972,19 @@ function renderArchiveChartControls(){
   if(archiveSelectionPanels.length){
     archiveSelectionPanels.forEach(panel => {
       const panelMode = panel.dataset.archiveModePanel;
-      panel.hidden = panelMode !== mode;
+      panel.hidden = !mode || panelMode !== mode;
     });
   }
 
+  const disableRangeControls = mode !== 'range';
   if(archiveShowFilterStart){
-    archiveShowFilterStart.value = filters.startDate || '';
-    archiveShowFilterStart.disabled = mode !== 'range';
+    archiveShowFilterStart.value = disableRangeControls ? '' : (filters.startDate || '');
+    archiveShowFilterStart.disabled = disableRangeControls;
     archiveShowFilterStart.setAttribute('aria-disabled', archiveShowFilterStart.disabled ? 'true' : 'false');
   }
   if(archiveShowFilterEnd){
-    archiveShowFilterEnd.value = filters.endDate || '';
-    archiveShowFilterEnd.disabled = mode !== 'range';
+    archiveShowFilterEnd.value = disableRangeControls ? '' : (filters.endDate || '');
+    archiveShowFilterEnd.disabled = disableRangeControls;
     archiveShowFilterEnd.setAttribute('aria-disabled', archiveShowFilterEnd.disabled ? 'true' : 'false');
   }
 
@@ -1073,8 +1075,9 @@ function renderArchiveChart(){
   const metrics = Array.isArray(state.selectedArchiveMetrics)
     ? state.selectedArchiveMetrics.filter(key => getArchiveMetricDef(key)?.chartable)
     : [];
-  const mode = state.archiveChartSelectionMode === 'list' ? 'list' : 'range';
-  const shows = getSelectedArchiveChartShows();
+  const rawMode = state.archiveChartSelectionMode;
+  const mode = rawMode === 'list' ? 'list' : rawMode === 'range' ? 'range' : null;
+  const shows = mode ? getSelectedArchiveChartShows() : [];
   const hasAnyShows = Array.isArray(state.archivedShows) && state.archivedShows.length > 0;
   const rangeMatches = mode === 'range' ? getRangeFilteredArchivedShows(state.archivedShows) : [];
   if(!shows.length || !metrics.length){
@@ -1087,6 +1090,8 @@ function renderArchiveChart(){
       if(hasAnyShows){
         if(!metrics.length){
           message = 'Select one or more metrics to render the chart.';
+        }else if(!mode){
+          message = 'Choose a show source to begin.';
         }else if(mode === 'range'){
           message = rangeMatches.length
             ? 'Select one or more metrics to render the chart.'
@@ -1563,17 +1568,20 @@ function getSelectedArchiveChartShows(){
   if(!shows.length){
     return [];
   }
-  const mode = state.archiveChartSelectionMode === 'list' ? 'list' : 'range';
-  if(mode === 'range'){
+  const rawMode = state.archiveChartSelectionMode;
+  if(rawMode === 'range'){
     return getRangeFilteredArchivedShows(shows);
   }
-  const selectedIds = new Set(Array.isArray(state.selectedArchiveChartShows) ? state.selectedArchiveChartShows : []);
-  if(!selectedIds.size){
-    return [];
+  if(rawMode === 'list'){
+    const selectedIds = new Set(Array.isArray(state.selectedArchiveChartShows) ? state.selectedArchiveChartShows : []);
+    if(!selectedIds.size){
+      return [];
+    }
+    const selected = shows.filter(show => selectedIds.has(show.id));
+    selected.sort((a, b)=> (getShowTimestamp(a) ?? 0) - (getShowTimestamp(b) ?? 0));
+    return selected;
   }
-  const selected = shows.filter(show => selectedIds.has(show.id));
-  selected.sort((a, b)=> (getShowTimestamp(a) ?? 0) - (getShowTimestamp(b) ?? 0));
-  return selected;
+  return [];
 }
 
 function buildArchiveDayGroups(shows){
