@@ -254,6 +254,7 @@ const archiveStatEmpty = el('archiveStatEmpty');
 const archiveDayDetail = el('archiveDayDetail');
 const archiveDayDetailTitle = el('archiveDayDetailTitle');
 const archiveDayDetailContent = el('archiveDayDetailContent');
+let archiveDayDetailCloseTimer = null;
 const closeArchiveDayDetailBtn = el('closeArchiveDayDetail');
 const refreshArchiveBtn = el('refreshArchive');
 const connectionStatusEl = el('connectionStatus');
@@ -1268,7 +1269,16 @@ function openArchiveDayDetail(day){
   state.activeArchiveDayKey = day.dateKey || null;
   renderArchiveDayDetail(day);
   if(archiveDayDetail){
+    if(archiveDayDetailCloseTimer){
+      clearTimeout(archiveDayDetailCloseTimer);
+      archiveDayDetailCloseTimer = null;
+    }
     archiveDayDetail.hidden = false;
+    archiveDayDetail.classList.remove('closing');
+    archiveDayDetail.classList.remove('showing');
+    // Trigger reflow so the entrance animation plays when re-opening quickly
+    void archiveDayDetail.offsetWidth;
+    archiveDayDetail.classList.add('showing');
   }
 }
 
@@ -1318,56 +1328,81 @@ function renderArchiveDayDetail(day){
     ? `<div class="archive-day-metrics">${metricCards.join('')}</div>`
     : `<p class="help small">Select one or more metrics to compare shows.</p>`;
 
-  let tableMarkup = `<p class="help small">Shows for this date will appear here once recorded.</p>`;
-  if(showCount){
-    const headerCells = metrics.map(metricKey => {
-      const def = getArchiveMetricDef(metricKey);
-      return `<th scope="col">${escapeHtml(def?.label || metricKey)}</th>`;
-    }).join('');
-    const bodyRows = day.shows.map(item => {
-      const show = item?.show;
-      if(!show){
-        return '';
-      }
-      const showLabel = escapeHtml(buildArchiveShowLabel(show));
-      const metricCells = metrics.map(metricKey => {
-        const def = getArchiveMetricDef(metricKey);
-        const summary = def ? (day.metrics?.[metricKey] || getOrCreateGroupMetricSummary(day, metricKey, def)) : null;
-        const entry = summary?.valueMap?.[show.id];
-        const valueText = entry ? entry.formatted : '—';
-        return `<td class="metric-cell">${escapeHtml(valueText)}</td>`;
-      }).join('');
-      return `<tr><th scope="row">${showLabel}</th>${metricCells}</tr>`;
-    }).filter(Boolean).join('');
-    tableMarkup = `
-      <table class="archive-day-table">
-        <thead>
-          <tr><th scope="col">Show</th>${headerCells}</tr>
-        </thead>
-        <tbody>
-          ${bodyRows}
-        </tbody>
-      </table>
-    `;
-  }
+  const showListLimit = 3;
+  const showItems = showCount
+    ? day.shows.slice(0, showListLimit).map(item => {
+        const show = item?.show;
+        if(!show){
+          return '';
+        }
+        const showLabel = escapeHtml(buildArchiveShowLabel(show));
+        const metricSnippets = metrics.map(metricKey => {
+          const def = getArchiveMetricDef(metricKey);
+          if(!def){
+            return '';
+          }
+          const summary = day.metrics?.[metricKey] || getOrCreateGroupMetricSummary(day, metricKey, def);
+          const entry = summary?.valueMap?.[show.id];
+          const valueText = entry ? entry.formatted : '—';
+          const shortLabel = (def.label || metricKey).replace(/\s*\([^)]*\)/g, '').trim() || metricKey;
+          return `<span class="metric"><span class="metric-label">${escapeHtml(shortLabel)}</span><span class="metric-value">${escapeHtml(valueText)}</span></span>`;
+        }).filter(Boolean).join('');
+        return `
+          <li class="archive-day-show">
+            <span class="archive-day-show-name">${showLabel}</span>
+            ${metricSnippets ? `<span class="archive-day-show-metrics">${metricSnippets}</span>` : ''}
+          </li>
+        `;
+      }).filter(Boolean)
+    : [];
+  const remainingShows = Math.max(0, showCount - showItems.length);
+  const showSection = showItems.length
+    ? `
+      <div class="archive-day-shows">
+        <ul class="archive-day-show-list">${showItems.join('')}</ul>
+        ${remainingShows ? `<p class="archive-day-more">+${remainingShows} more ${remainingShows === 1 ? 'show' : 'shows'} logged this day</p>` : ''}
+      </div>
+    `
+    : `<p class="help small">Shows for this date will appear here once recorded.</p>`;
 
   archiveDayDetailContent.innerHTML = `
     <p class="archive-day-summary">${escapeHtml(summaryLine)}</p>
     ${metricSection}
-    ${tableMarkup}
+    ${showSection}
   `;
 }
 
 function closeArchiveDayDetail(){
   state.activeArchiveDayKey = null;
   if(archiveDayDetail){
+    archiveDayDetail.classList.remove('showing');
+    archiveDayDetail.classList.add('closing');
+    if(archiveDayDetailCloseTimer){
+      clearTimeout(archiveDayDetailCloseTimer);
+    }
+    archiveDayDetailCloseTimer = setTimeout(()=>{
+      finalizeArchiveDayDetailHide();
+    }, 180);
+  }else{
+    finalizeArchiveDayDetailHide();
+  }
+}
+
+function finalizeArchiveDayDetailHide(){
+  if(archiveDayDetail){
     archiveDayDetail.hidden = true;
+    archiveDayDetail.classList.remove('closing');
+    archiveDayDetail.classList.remove('showing');
   }
   if(archiveDayDetailContent){
     archiveDayDetailContent.innerHTML = '';
   }
   if(archiveDayDetailTitle){
     archiveDayDetailTitle.textContent = 'Day breakdown';
+  }
+  if(archiveDayDetailCloseTimer){
+    clearTimeout(archiveDayDetailCloseTimer);
+    archiveDayDetailCloseTimer = null;
   }
 }
 
@@ -1868,6 +1903,12 @@ function buildArchiveChartOptions(axisDescriptors){
         backgroundColor: 'rgba(15, 23, 42, 0.92)',
         borderColor: 'rgba(59, 130, 246, 0.45)',
         borderWidth: 1,
+        displayColors: false,
+        padding: 10,
+        bodySpacing: 6,
+        titleSpacing: 4,
+        boxPadding: 4,
+        caretSize: 6,
         callbacks: {
           title: items => formatArchiveTooltipTitleFromItems(items),
           label: context => formatArchiveTooltipLabel(context),
@@ -1964,7 +2005,7 @@ function formatArchiveTooltipBreakdown(items){
     return [];
   }
   const showCount = Array.isArray(day.shows) ? day.shows.length : 0;
-  const lines = [`Shows logged: ${showCount}`];
+  const lines = [`${showCount} ${showCount === 1 ? 'show' : 'shows'} logged`];
   const metrics = getActiveArchiveMetricKeys();
   metrics.forEach(metricKey => {
     const def = getArchiveMetricDef(metricKey);
@@ -1975,18 +2016,9 @@ function formatArchiveTooltipBreakdown(items){
     if(!summary){
       return;
     }
-    const pieces = (summary.showValues || [])
-      .map(entry => {
-        const label = entry?.shortLabel || entry?.label || '';
-        if(!label){
-          return null;
-        }
-        return `${label}: ${entry.formatted}`;
-      })
-      .filter(Boolean);
-    if(pieces.length){
-      lines.push(`${def.label} by show: ${pieces.join(' • ')}`);
-    }
+    const averageText = formatMetricValue(def, summary.average);
+    const countText = typeof summary.count === 'number' ? ` • n=${summary.count}` : '';
+    lines.push(`${def.label}: ${averageText}${countText}`);
   });
   return lines;
 }
