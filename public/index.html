@@ -131,6 +131,7 @@
           <label for="archiveShowSelect">Archived show</label>
           <select id="archiveShowSelect"></select>
           <p id="archiveMeta" class="help"></p>
+          <section id="archiveStats" class="archive-stats" aria-live="polite"></section>
         </div>
         <div class="col-8">
           <div id="archiveDetails" class="archive-details"></div>
@@ -139,6 +140,32 @@
             <button id="archiveExportCsv" type="button" class="btn ghost" disabled>Export CSV</button>
             <button id="archiveExportJson" type="button" class="btn ghost" disabled>Export JSON</button>
           </div>
+        </div>
+      </div>
+      <div class="archive-analytics" aria-live="polite">
+        <div class="archive-analytics-header">
+          <h3>Archive analytics</h3>
+          <p class="help">Graph show statistics over time to spot trends.</p>
+        </div>
+        <div class="archive-analytics-controls">
+          <div class="control-group">
+            <label for="archiveStatSelect">Statistic</label>
+            <select id="archiveStatSelect">
+              <option value="entriesCount">Entries logged</option>
+              <option value="avgDelaySec">Average delay (s)</option>
+              <option value="completionRate">Completion rate (%)</option>
+              <option value="launchRate">Launch rate (%)</option>
+              <option value="abortRate">Abort rate (%)</option>
+            </select>
+          </div>
+          <div class="control-group">
+            <span class="control-label">Shows to plot</span>
+            <div id="archiveStatShowList" class="archive-show-list"></div>
+          </div>
+        </div>
+        <div class="archive-chart-wrap">
+          <canvas id="archiveStatCanvas" class="archive-chart" height="260" role="img" aria-label="Archived show statistic over time"></canvas>
+          <p id="archiveStatEmpty" class="help">Select one or more shows to render the chart.</p>
         </div>
       </div>
     </section>
