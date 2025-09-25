@@ -972,7 +972,17 @@ function renderArchiveChartControls(){
   if(archiveSelectionPanels.length){
     archiveSelectionPanels.forEach(panel => {
       const panelMode = panel.dataset.archiveModePanel;
-      panel.hidden = !mode || panelMode !== mode;
+      const isActive = Boolean(mode) && panelMode === mode;
+      panel.hidden = !isActive;
+      panel.classList.toggle('is-active', isActive);
+      panel.setAttribute('aria-hidden', isActive ? 'false' : 'true');
+      if('inert' in panel){
+        panel.inert = !isActive;
+      }else if(!isActive){
+        panel.setAttribute('aria-disabled', 'true');
+      }else{
+        panel.removeAttribute('aria-disabled');
+      }
     });
   }
 
