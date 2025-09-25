@@ -234,7 +234,7 @@ const archiveEmpty = el('archiveEmpty');
 const archiveExportCsvBtn = el('archiveExportCsv');
 const archiveExportJsonBtn = el('archiveExportJson');
 const archiveStats = el('archiveStats');
-const archiveStatSelect = el('archiveStatSelect');
+const archiveMetricOptions = el('archiveMetricOptions');
 const archiveStatShowSelect = el('archiveStatShowSelect');
 const archiveShowFilterStart = el('archiveShowFilterStart');
 const archiveShowFilterEnd = el('archiveShowFilterEnd');
@@ -345,8 +345,8 @@ function initUI(){
   if(archiveExportJsonBtn){
     archiveExportJsonBtn.addEventListener('click', ()=> exportSelectedArchive('json'));
   }
-  if(archiveStatSelect){
-    archiveStatSelect.addEventListener('change', onArchiveMetricSelectionChange);
+  if(archiveMetricOptions){
+    archiveMetricOptions.addEventListener('click', onArchiveMetricOptionClick);
   }
   if(archiveStatShowSelect){
     archiveStatShowSelect.addEventListener('change', onArchiveShowSelectChange);
@@ -1035,12 +1035,26 @@ function renderArchiveChartControls(){
   }
   state.selectedArchiveMetrics = selectedMetrics;
 
-  if(archiveStatSelect){
-    Array.from(archiveStatSelect.options).forEach(option => {
-      option.hidden = !chartableMetrics.includes(option.value);
-      option.selected = state.selectedArchiveMetrics.includes(option.value);
-    });
-    archiveStatSelect.disabled = chartableMetrics.length === 0;
+  if(archiveMetricOptions){
+    if(chartableMetrics.length){
+      const selectedSet = new Set(selectedMetrics);
+      const buttonsMarkup = chartableMetrics.map(key => {
+        const def = getArchiveMetricDef(key);
+        const label = def?.label || key;
+        const isSelected = selectedSet.has(key);
+        const classes = ['archive-metric-option'];
+        if(isSelected){
+          classes.push('is-selected');
+        }
+        const escapedKey = escapeHtml(key);
+        return `<button type="button" class="${classes.join(' ')}" data-archive-metric="${escapedKey}" aria-pressed="${isSelected ? 'true' : 'false'}">${escapeHtml(label)}</button>`;
+      }).join('');
+      archiveMetricOptions.innerHTML = buttonsMarkup;
+      archiveMetricOptions.setAttribute('aria-disabled', 'false');
+    }else{
+      archiveMetricOptions.innerHTML = '<p class="help small">No metrics available.</p>';
+      archiveMetricOptions.setAttribute('aria-disabled', 'true');
+    }
   }
 
   if(archiveStatEmpty){
@@ -1164,8 +1178,10 @@ function renderArchiveChart(){
 
 function setArchiveChartSelectionMode(mode){
   const normalized = mode === 'list' ? 'list' : 'range';
-  if(state.archiveChartSelectionMode !== normalized){
+  const changed = state.archiveChartSelectionMode !== normalized;
+  if(changed){
     state.archiveChartSelectionMode = normalized;
+    clearArchiveDayDetail();
     if(normalized === 'list'){
       syncArchiveChartSelection();
     }
@@ -1328,15 +1344,43 @@ function formatArchiveDetailTime(show, timestamp){
   return '';
 }
 
-function onArchiveMetricSelectionChange(){
-  if(!archiveStatSelect){
+function onArchiveMetricOptionClick(event){
+  if(!archiveMetricOptions || archiveMetricOptions.getAttribute('aria-disabled') === 'true'){
     return;
   }
-  const selected = Array.from(archiveStatSelect.selectedOptions || [])
-    .map(option => option.value)
-    .filter(value => getArchiveMetricDef(value)?.chartable);
-  state.selectedArchiveMetrics = selected;
+  const button = event.target?.closest?.('[data-archive-metric]');
+  if(!button){
+    return;
+  }
+  const metricKey = button.dataset.archiveMetric;
+  const def = getArchiveMetricDef(metricKey);
+  if(!def || !def.chartable){
+    return;
+  }
+  const existing = Array.isArray(state.selectedArchiveMetrics)
+    ? state.selectedArchiveMetrics.slice()
+    : [];
+  const index = existing.indexOf(metricKey);
+  if(index >= 0){
+    existing.splice(index, 1);
+  }else{
+    existing.push(metricKey);
+  }
+  const chartableMetrics = getChartableMetricKeys();
+  const selectionSet = new Set(existing);
+  const normalized = chartableMetrics.filter(key => selectionSet.has(key));
+  state.selectedArchiveMetrics = normalized;
+  renderArchiveChartControls();
   renderArchiveChart();
+  if(typeof metricKey === 'string'){
+    requestAnimationFrame(()=>{
+      const selector = `[data-archive-metric="${escapeCssSelector(metricKey)}"]`;
+      const nextButton = archiveMetricOptions?.querySelector(selector);
+      if(nextButton){
+        nextButton.focus();
+      }
+    });
+  }
 }
 
 function onArchiveShowSelectChange(){
@@ -3801,6 +3845,16 @@ function formatDateTime(value){
 
 function escapeHtml(str){
   return String(str || '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+}
+
+function escapeCssSelector(value){
+  if(typeof value !== 'string'){
+    return '';
+  }
+  if(typeof CSS !== 'undefined' && typeof CSS.escape === 'function'){
+    return CSS.escape(value);
+  }
+  return value.replace(/([!"#$%&'()*+,./:;<=>?@[\\\]^`{|}~\s])/g, '\\$1');
 }
 
 function normalizeArchivedShow(raw = {}){

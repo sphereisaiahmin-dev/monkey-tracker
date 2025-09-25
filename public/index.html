@@ -149,14 +149,8 @@
         </div>
         <div class="archive-analytics-controls">
           <div class="control-group">
-            <label for="archiveStatSelect">Metrics</label>
-            <select id="archiveStatSelect" multiple size="5" aria-describedby="archiveMetricHelp">
-              <option value="entriesCount">Entries logged</option>
-              <option value="avgDelaySec">Average delay (s)</option>
-              <option value="completionRate">Completion rate (%)</option>
-              <option value="launchRate">Launch rate (%)</option>
-              <option value="abortRate">Abort rate (%)</option>
-            </select>
+            <span class="control-label" id="archiveMetricLabel">Metrics</span>
+            <div id="archiveMetricOptions" class="archive-metric-options" role="group" aria-labelledby="archiveMetricLabel" aria-describedby="archiveMetricHelp"></div>
             <p id="archiveMetricHelp" class="help small">Select one or more metrics to visualise together.</p>
           </div>
           <div class="control-group">
@@ -167,7 +161,7 @@
             </div>
             <p class="help small">Choose how the graph is populated with shows.</p>
           </div>
-          <div class="control-group" id="archiveRangeControls" data-archive-mode-panel="range">
+          <div class="control-group" id="archiveRangeControls" data-archive-mode-panel="range" hidden>
             <span class="control-label">Date range</span>
             <div class="date-range" role="group" aria-label="Archive date range">
               <label class="sr-only" for="archiveShowFilterStart">Start date</label>
