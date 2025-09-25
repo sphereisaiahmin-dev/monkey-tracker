@@ -1386,6 +1386,7 @@ function onArchiveMetricOptionClick(event){
   const normalized = chartableMetrics.filter(key => selectionSet.has(key));
   state.selectedArchiveMetrics = normalized;
   renderArchiveChartControls();
+  clearArchiveDayDetail();
   renderArchiveChart();
   if(typeof metricKey === 'string'){
     requestAnimationFrame(()=>{
@@ -1407,6 +1408,7 @@ function onArchiveShowSelectChange(){
   }
   const selected = Array.from(archiveStatShowSelect.selectedOptions || []).map(option => option.value);
   state.selectedArchiveChartShows = selected;
+  clearArchiveDayDetail();
   renderArchiveChart();
 }
 
@@ -1419,6 +1421,7 @@ function onArchiveDateFilterChange(field, value){
   }
   state.archiveChartFilters[field] = value || null;
   renderArchiveChartControls();
+  clearArchiveDayDetail();
   renderArchiveChart();
 }
 
@@ -1430,6 +1433,7 @@ function selectAllFilteredArchiveShows(){
   shows.sort((a, b)=> (getShowTimestamp(a) ?? 0) - (getShowTimestamp(b) ?? 0));
   state.selectedArchiveChartShows = shows.map(show => show.id);
   renderArchiveChartControls();
+  clearArchiveDayDetail();
   renderArchiveChart();
 }
 
@@ -1486,6 +1490,7 @@ function loadSampleArchiveMonth(){
   };
   renderArchiveSelect();
   renderArchiveChartControls();
+  clearArchiveDayDetail();
   renderArchiveChart();
   const current = getArchivedShow(state.currentArchivedShowId);
   renderArchiveStats(current);
