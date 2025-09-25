@@ -122,6 +122,11 @@ const state = {
   archivedShows: [],
   currentArchivedShowId: null,
   selectedArchiveChartShows: [],
+  selectedArchiveMetrics: ['launchRate', 'avgDelaySec'],
+  archiveChartFilters: {
+    startDate: null,
+    endDate: null
+  },
   webhookConfig: {
     enabled: false,
     url: '',
@@ -148,6 +153,9 @@ const syncState = {
     ? crypto.randomUUID()
     : `sync-${Date.now()}-${Math.random().toString(16).slice(2)}`
 };
+
+const ARCHIVE_CHART_COLORS = ['#16a34a', '#f97316', '#38bdf8', '#a855f7', '#facc15', '#f472b6', '#22d3ee'];
+let archiveChartInstance = null;
 
 const SYNC_CHANNEL_NAME = 'monkey-tracker-sync';
 
@@ -224,7 +232,12 @@ const archiveExportCsvBtn = el('archiveExportCsv');
 const archiveExportJsonBtn = el('archiveExportJson');
 const archiveStats = el('archiveStats');
 const archiveStatSelect = el('archiveStatSelect');
-const archiveStatShowList = el('archiveStatShowList');
+const archiveStatShowSelect = el('archiveStatShowSelect');
+const archiveShowFilterStart = el('archiveShowFilterStart');
+const archiveShowFilterEnd = el('archiveShowFilterEnd');
+const archiveSelectAllShowsBtn = el('archiveSelectAllShows');
+const archiveClearShowSelectionBtn = el('archiveClearShowSelection');
+const archiveLoadSampleBtn = el('archiveLoadSample');
 const archiveStatCanvas = el('archiveStatCanvas');
 const archiveStatEmpty = el('archiveStatEmpty');
 const refreshArchiveBtn = el('refreshArchive');
@@ -323,10 +336,25 @@ function initUI(){
     archiveExportJsonBtn.addEventListener('click', ()=> exportSelectedArchive('json'));
   }
   if(archiveStatSelect){
-    archiveStatSelect.addEventListener('change', renderArchiveChart);
+    archiveStatSelect.addEventListener('change', onArchiveMetricSelectionChange);
   }
-  if(archiveStatShowList){
-    archiveStatShowList.addEventListener('change', onArchiveChartShowToggle);
+  if(archiveStatShowSelect){
+    archiveStatShowSelect.addEventListener('change', onArchiveShowSelectChange);
+  }
+  if(archiveShowFilterStart){
+    archiveShowFilterStart.addEventListener('change', ()=> onArchiveDateFilterChange('startDate', archiveShowFilterStart.value));
+  }
+  if(archiveShowFilterEnd){
+    archiveShowFilterEnd.addEventListener('change', ()=> onArchiveDateFilterChange('endDate', archiveShowFilterEnd.value));
+  }
+  if(archiveSelectAllShowsBtn){
+    archiveSelectAllShowsBtn.addEventListener('click', selectAllFilteredArchiveShows);
+  }
+  if(archiveClearShowSelectionBtn){
+    archiveClearShowSelectionBtn.addEventListener('click', clearFilteredArchiveSelection);
+  }
+  if(archiveLoadSampleBtn){
+    archiveLoadSampleBtn.addEventListener('click', loadSampleArchiveMonth);
   }
   if(roleHomeBtn){
     roleHomeBtn.addEventListener('click', ()=> setView('landing'));
@@ -895,96 +923,119 @@ function renderArchiveStats(show){
 }
 
 function renderArchiveChartControls(){
-  if(!archiveStatShowList){
-    return;
-  }
   const shows = Array.isArray(state.archivedShows) ? state.archivedShows : [];
-  if(!shows.length){
-    archiveStatShowList.innerHTML = '<p class="help">No archived shows available yet.</p>';
-    if(archiveStatEmpty){
+  const filters = typeof state.archiveChartFilters === 'object' && state.archiveChartFilters
+    ? state.archiveChartFilters
+    : {startDate: null, endDate: null};
+  if(archiveShowFilterStart){
+    archiveShowFilterStart.value = filters.startDate || '';
+  }
+  if(archiveShowFilterEnd){
+    archiveShowFilterEnd.value = filters.endDate || '';
+  }
+
+  const filteredShows = getFilteredArchivedShows(shows);
+  const filteredIds = new Set(filteredShows.map(show => show.id));
+  const currentSelection = Array.isArray(state.selectedArchiveChartShows)
+    ? state.selectedArchiveChartShows
+    : [];
+  const prunedSelection = currentSelection.filter(id => filteredIds.has(id));
+  if(prunedSelection.length !== currentSelection.length){
+    state.selectedArchiveChartShows = prunedSelection;
+  }
+  if(!state.selectedArchiveChartShows.length && filteredShows.length){
+    state.selectedArchiveChartShows = filteredShows.map(show => show.id);
+  }
+
+  if(archiveStatShowSelect){
+    if(filteredShows.length){
+      const optionsMarkup = filteredShows.map(show => {
+        const label = buildArchiveShowLabel(show);
+        const id = escapeHtml(show.id || '');
+        return `<option value="${id}">${escapeHtml(label)}</option>`;
+      }).join('');
+      archiveStatShowSelect.innerHTML = optionsMarkup;
+      const selectedSet = new Set(state.selectedArchiveChartShows || []);
+      Array.from(archiveStatShowSelect.options).forEach(option => {
+        option.selected = selectedSet.has(option.value);
+      });
+      archiveStatShowSelect.disabled = false;
+    }else{
+      archiveStatShowSelect.innerHTML = '';
+      archiveStatShowSelect.disabled = true;
+    }
+  }
+
+  const chartableMetrics = getChartableMetricKeys();
+  let selectedMetrics = Array.isArray(state.selectedArchiveMetrics)
+    ? state.selectedArchiveMetrics.filter(key => chartableMetrics.includes(key))
+    : [];
+  if(!selectedMetrics.length && chartableMetrics.length){
+    selectedMetrics = chartableMetrics.slice(0, Math.min(2, chartableMetrics.length));
+  }
+  state.selectedArchiveMetrics = selectedMetrics;
+
+  if(archiveStatSelect){
+    Array.from(archiveStatSelect.options).forEach(option => {
+      option.hidden = !chartableMetrics.includes(option.value);
+      option.selected = state.selectedArchiveMetrics.includes(option.value);
+    });
+    archiveStatSelect.disabled = chartableMetrics.length === 0;
+  }
+
+  if(archiveStatEmpty){
+    if(!shows.length){
       archiveStatEmpty.hidden = false;
       archiveStatEmpty.textContent = 'Archive data will appear once shows are archived.';
+    }else if(!filteredShows.length){
+      archiveStatEmpty.hidden = false;
+      archiveStatEmpty.textContent = 'No archived shows match the selected date range.';
+    }else if(!state.selectedArchiveMetrics.length){
+      archiveStatEmpty.hidden = false;
+      archiveStatEmpty.textContent = 'Select one or more metrics to render the chart.';
     }
-    return;
   }
-  const selected = new Set(Array.isArray(state.selectedArchiveChartShows) ? state.selectedArchiveChartShows : []);
-  const markup = shows.map(show => {
-    const label = buildArchiveShowLabel(show);
-    const checked = selected.has(show.id) ? ' checked' : '';
-    const showId = escapeHtml(show.id || '');
-    return `<label><input type="checkbox" data-show-id="${showId}"${checked}> ${escapeHtml(label)}</label>`;
-  }).join('');
-  archiveStatShowList.innerHTML = markup || '<p class="help">No archived shows available yet.</p>';
-  if(archiveStatEmpty){
-    archiveStatEmpty.textContent = 'Select one or more shows to render the chart.';
-  }
-}
-
-function onArchiveChartShowToggle(event){
-  const target = event.target;
-  if(!target || target.type !== 'checkbox' || !target.dataset.showId){
-    return;
-  }
-  const showId = target.dataset.showId;
-  const selection = new Set(Array.isArray(state.selectedArchiveChartShows) ? state.selectedArchiveChartShows : []);
-  if(target.checked){
-    selection.add(showId);
-  }else{
-    selection.delete(showId);
-  }
-  state.selectedArchiveChartShows = Array.from(selection);
-  renderArchiveChart();
 }
 
 function renderArchiveChart(){
-  if(!archiveStatCanvas){
+  if(!archiveStatCanvas || typeof Chart === 'undefined'){
     return;
   }
   const ctx = archiveStatCanvas.getContext('2d');
   if(!ctx){
     return;
   }
-  const metricKey = (archiveStatSelect && ARCHIVE_METRIC_DEFS[archiveStatSelect.value])
-    ? archiveStatSelect.value
-    : 'entriesCount';
-  if(archiveStatSelect && archiveStatSelect.value !== metricKey){
-    archiveStatSelect.value = metricKey;
+  const metrics = Array.isArray(state.selectedArchiveMetrics)
+    ? state.selectedArchiveMetrics.filter(key => getArchiveMetricDef(key)?.chartable)
+    : [];
+  const shows = getSelectedArchiveChartShows();
+  if(!shows.length || !metrics.length){
+    if(archiveChartInstance){
+      archiveChartInstance.destroy();
+      archiveChartInstance = null;
+    }
+    if(archiveStatEmpty){
+      const hasShows = Array.isArray(state.archivedShows) && state.archivedShows.length > 0;
+      const message = !hasShows
+        ? 'Archive data will appear once shows are archived.'
+        : (!shows.length
+          ? 'Select one or more shows to render the chart.'
+          : 'Select one or more metrics to render the chart.');
+      archiveStatEmpty.hidden = false;
+      archiveStatEmpty.textContent = message;
+    }
+    return;
   }
-  const metricDef = getArchiveMetricDef(metricKey) || getArchiveMetricDef('entriesCount');
-  const selectedIds = new Set(Array.isArray(state.selectedArchiveChartShows) ? state.selectedArchiveChartShows : []);
-  const shows = Array.isArray(state.archivedShows) ? state.archivedShows.filter(show => selectedIds.has(show.id)) : [];
-  const points = shows.map(show => {
-    const stats = computeArchiveShowStats(show);
-    const value = metricDef ? metricDef.getValue(stats, show) : null;
-    return {
-      show,
-      stats,
-      value,
-      timestamp: getShowTimestamp(show)
-    };
-  }).filter(point => isValidMetricValue(point.value) && point.timestamp !== null);
-  points.sort((a, b)=> a.timestamp - b.timestamp);
 
-  const ratio = window.devicePixelRatio || 1;
-  const displayWidth = archiveStatCanvas.clientWidth || archiveStatCanvas.width || 600;
-  const displayHeight = archiveStatCanvas.clientHeight || archiveStatCanvas.height || 260;
-  if(archiveStatCanvas.width !== displayWidth * ratio){
-    archiveStatCanvas.width = displayWidth * ratio;
-  }
-  if(archiveStatCanvas.height !== displayHeight * ratio){
-    archiveStatCanvas.height = displayHeight * ratio;
-  }
-  ctx.save();
-  ctx.scale(ratio, ratio);
-  ctx.clearRect(0, 0, displayWidth, displayHeight);
-
-  if(!points.length){
-    ctx.restore();
+  const chartData = buildArchiveChartData(shows, metrics);
+  if(!chartData.datasets.length){
+    if(archiveChartInstance){
+      archiveChartInstance.destroy();
+      archiveChartInstance = null;
+    }
     if(archiveStatEmpty){
       archiveStatEmpty.hidden = false;
-      archiveStatEmpty.textContent = selectedIds.size
-        ? 'Selected shows do not have data for this statistic yet.'
-        : 'Select one or more shows to render the chart.';
+      archiveStatEmpty.textContent = 'Selected shows do not have data for the chosen metrics yet.';
     }
     return;
   }
@@ -993,123 +1044,459 @@ function renderArchiveChart(){
     archiveStatEmpty.hidden = true;
   }
 
-  archiveStatCanvas.setAttribute('aria-label', `${metricDef ? metricDef.label : 'Archive statistic'} over time`);
+  const data = { datasets: chartData.datasets };
+  const options = buildArchiveChartOptions(chartData.axes);
 
-  const padding = {top: 28, right: 24, bottom: 56, left: 68};
-  const innerWidth = Math.max(10, displayWidth - padding.left - padding.right);
-  const innerHeight = Math.max(10, displayHeight - padding.top - padding.bottom);
-
-  const xValues = points.map(point => point.timestamp);
-  const yValues = points.map(point => Number(point.value));
-  let xMin = Math.min(...xValues);
-  let xMax = Math.max(...xValues);
-  if(xMax === xMin){
-    const offset = 60 * 60 * 1000;
-    xMin -= offset;
-    xMax += offset;
-  }
-  let yMin = Math.min(...yValues);
-  let yMax = Math.max(...yValues);
-  if(metricDef && typeof metricDef.min === 'number'){
-    yMin = Math.min(yMin, metricDef.min);
-  }
-  if(metricDef && typeof metricDef.max === 'number'){
-    yMax = Math.max(yMax, metricDef.max);
-  }
-  if(yMax === yMin){
-    const pad = yMax === 0 ? 1 : Math.abs(yMax) * 0.1;
-    yMax += pad;
-    yMin = yMin - pad;
-  }
-  if(metricDef && typeof metricDef.min === 'number' && yMin < metricDef.min){
-    yMin = metricDef.min;
-  }
-  if(metricDef && typeof metricDef.max === 'number' && yMax < metricDef.max){
-    yMax = metricDef.max;
-  }
-  if(yMax === yMin){
-    yMax = yMin + 1;
-  }
-  const xScale = value => padding.left + ((value - xMin) / (xMax - xMin)) * innerWidth;
-  const yScale = value => padding.top + innerHeight - ((value - yMin) / (yMax - yMin)) * innerHeight;
-
-  ctx.strokeStyle = 'rgba(255,255,255,0.25)';
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(padding.left, padding.top);
-  ctx.lineTo(padding.left, padding.top + innerHeight);
-  ctx.lineTo(padding.left + innerWidth, padding.top + innerHeight);
-  ctx.stroke();
-
-  const axisFont = '12px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
-  ctx.font = axisFont;
-  ctx.fillStyle = 'rgba(255,255,255,0.65)';
-  ctx.textAlign = 'left';
-  ctx.textBaseline = 'middle';
-  const yTicks = 4;
-  for(let i = 0; i <= yTicks; i++){
-    const t = i / yTicks;
-    const value = yMin + (yMax - yMin) * t;
-    const y = yScale(value);
-    ctx.beginPath();
-    ctx.moveTo(padding.left - 6, y);
-    ctx.lineTo(padding.left, y);
-    ctx.stroke();
-    const label = formatChartAxisValue(metricDef, value);
-    ctx.fillText(label, 8, y);
+  if(archiveChartInstance){
+    archiveChartInstance.data = data;
+    archiveChartInstance.options = options;
+    archiveChartInstance.update();
+  }else{
+    archiveChartInstance = new Chart(ctx, {
+      type: 'line',
+      data,
+      options
+    });
   }
 
-  const dateFormatter = formatArchiveChartDate;
-  ctx.textBaseline = 'top';
-  ctx.textAlign = 'right';
-  points.forEach(point => {
-    const x = xScale(point.timestamp);
-    ctx.beginPath();
-    ctx.moveTo(x, padding.top + innerHeight);
-    ctx.lineTo(x, padding.top + innerHeight + 6);
-    ctx.stroke();
-    ctx.save();
-    ctx.translate(x, padding.top + innerHeight + 8);
-    ctx.rotate(-Math.PI / 4);
-    ctx.fillText(dateFormatter(point.timestamp), 0, 0);
-    ctx.restore();
+  const metricLabels = chartData.datasets.map(dataset => dataset.label).join(', ');
+  archiveStatCanvas.setAttribute('aria-label', `${metricLabels} over time`);
+}
+
+function onArchiveMetricSelectionChange(){
+  if(!archiveStatSelect){
+    return;
+  }
+  const selected = Array.from(archiveStatSelect.selectedOptions || [])
+    .map(option => option.value)
+    .filter(value => getArchiveMetricDef(value)?.chartable);
+  state.selectedArchiveMetrics = selected;
+  renderArchiveChart();
+}
+
+function onArchiveShowSelectChange(){
+  if(!archiveStatShowSelect){
+    return;
+  }
+  const selected = Array.from(archiveStatShowSelect.selectedOptions || []).map(option => option.value);
+  state.selectedArchiveChartShows = selected;
+  renderArchiveChart();
+}
+
+function onArchiveDateFilterChange(field, value){
+  if(!field){
+    return;
+  }
+  if(!state.archiveChartFilters || typeof state.archiveChartFilters !== 'object'){
+    state.archiveChartFilters = {startDate: null, endDate: null};
+  }
+  state.archiveChartFilters[field] = value || null;
+  renderArchiveChartControls();
+  renderArchiveChart();
+}
+
+function selectAllFilteredArchiveShows(){
+  const filtered = getFilteredArchivedShows();
+  state.selectedArchiveChartShows = filtered.map(show => show.id);
+  renderArchiveChartControls();
+  renderArchiveChart();
+}
+
+function clearFilteredArchiveSelection(){
+  state.selectedArchiveChartShows = [];
+  renderArchiveChartControls();
+  renderArchiveChart();
+}
+
+function loadSampleArchiveMonth(){
+  const now = new Date();
+  now.setHours(12, 0, 0, 0);
+  const start = new Date(now);
+  start.setDate(now.getDate() - 29);
+  const crew = ['Jamie', 'Quinn', 'Taylor'];
+  const pilots = ['Alex', 'Jordan', 'Kai'];
+  const leads = ['Cleo', 'Riley', 'Sage'];
+  const shows = [];
+  let counter = 0;
+  for(let day = 0; day < 30; day++){
+    for(let slot = 0; slot < 3; slot++){
+      const showDate = new Date(start);
+      showDate.setDate(start.getDate() + day);
+      showDate.setHours(12 + slot * 3, 0, 0, 0);
+      const isoDate = showDate.toISOString();
+      const show = {
+        id: `sample-${counter}`,
+        date: isoDate.slice(0, 10),
+        time: isoDate.slice(11, 16),
+        label: `Demo Show ${slot + 1}`,
+        leadPilot: pilots[slot % pilots.length],
+        monkeyLead: leads[slot % leads.length],
+        crew,
+        archivedAt: showDate.getTime() + 90 * 60 * 1000,
+        createdAt: showDate.getTime() - 90 * 60 * 1000,
+        updatedAt: showDate.getTime() + 90 * 60 * 1000,
+        entries: buildSampleEntries(showDate, counter)
+      };
+      shows.push(show);
+      counter += 1;
+    }
+  }
+  shows.sort((a, b)=> (getShowTimestamp(a) ?? 0) - (getShowTimestamp(b) ?? 0));
+  state.archivedShows = shows;
+  state.currentArchivedShowId = shows[0]?.id || null;
+  state.selectedArchiveChartShows = shows.map(show => show.id);
+  state.archiveChartFilters = {
+    startDate: shows[0]?.date || null,
+    endDate: shows[shows.length - 1]?.date || null
+  };
+  renderArchiveSelect();
+  renderArchiveChartControls();
+  renderArchiveChart();
+  const current = getArchivedShow(state.currentArchivedShowId);
+  renderArchiveStats(current);
+  renderArchiveDetails(current);
+  toast('Loaded sample archive dataset');
+}
+
+function buildSampleEntries(baseDate, offset){
+  const entries = [];
+  for(let i = 0; i < 9; i++){
+    const timestamp = baseDate.getTime() + i * 7 * 60 * 1000;
+    const statusRoll = (offset + i) % 6;
+    let status = 'Completed';
+    if(statusRoll === 4){
+      status = 'Abort';
+    }else if(statusRoll === 5){
+      status = 'No-launch';
+    }
+    const launched = status === 'No-launch' ? 'No' : 'Yes';
+    const delay = status === 'Completed'
+      ? Math.max(0, Math.round(2 + Math.random() * 18))
+      : Math.round(25 + Math.random() * 65);
+    entries.push({
+      id: `entry-${offset}-${i}`,
+      unitId: `D-${String(i + 1).padStart(2, '0')}`,
+      planned: 'Yes',
+      launched,
+      status,
+      primaryIssue: status === 'Completed' ? null : 'Command delay',
+      subIssue: status === 'Completed' ? null : (status === 'Abort' ? 'controller queue' : 'network latency'),
+      otherDetail: '',
+      severity: status === 'Abort' ? 'High' : (status === 'Completed' ? 'Low' : 'Medium'),
+      rootCause: status === 'Completed' ? null : (status === 'Abort' ? 'Weather' : 'Human'),
+      actions: status === 'Completed' ? ['Logged only'] : ['Retry launch'],
+      operator: ['Morgan', 'Sasha', 'Reese'][i % 3],
+      batteryId: `BAT-${String((offset + i) % 50).padStart(3, '0')}`,
+      delaySec: delay,
+      commandRx: 'Yes',
+      notes: status === 'Completed' ? '' : 'Simulated event',
+      ts: timestamp,
+      createdAt: timestamp,
+      updatedAt: timestamp
+    });
+  }
+  return entries;
+}
+
+function getChartableMetricKeys(){
+  return Object.keys(ARCHIVE_METRIC_DEFS).filter(key => ARCHIVE_METRIC_DEFS[key]?.chartable);
+}
+
+function getFilteredArchivedShows(shows = state.archivedShows){
+  const list = Array.isArray(shows) ? shows.slice() : [];
+  const filters = state.archiveChartFilters || {};
+  const startTs = parseFilterDate(filters.startDate, false);
+  const endTs = parseFilterDate(filters.endDate, true);
+  return list.filter(show => {
+    const timestamp = getShowTimestamp(show);
+    if(timestamp === null){
+      return false;
+    }
+    if(startTs !== null && timestamp < startTs){
+      return false;
+    }
+    if(endTs !== null && timestamp > endTs){
+      return false;
+    }
+    return true;
+  });
+}
+
+function parseFilterDate(value, endOfDay){
+  if(typeof value !== 'string' || !value){
+    return null;
+  }
+  const date = new Date(`${value}T00:00:00`);
+  if(Number.isNaN(date.getTime())){
+    return null;
+  }
+  if(endOfDay){
+    date.setHours(23, 59, 59, 999);
+  }
+  return date.getTime();
+}
+
+function getSelectedArchiveChartShows(){
+  const filtered = getFilteredArchivedShows();
+  const selectedIds = new Set(Array.isArray(state.selectedArchiveChartShows) ? state.selectedArchiveChartShows : []);
+  const shows = filtered.filter(show => selectedIds.has(show.id));
+  shows.sort((a, b)=> (getShowTimestamp(a) ?? 0) - (getShowTimestamp(b) ?? 0));
+  return shows;
+}
+
+function buildArchiveChartData(shows, metrics){
+  const axes = {};
+  const datasets = [];
+  const orderedShows = shows.map(show => ({
+    show,
+    stats: computeArchiveShowStats(show),
+    timestamp: getShowTimestamp(show)
+  })).filter(point => Number.isFinite(point.timestamp));
+  orderedShows.sort((a, b)=> a.timestamp - b.timestamp);
+
+  metrics.forEach((metricKey, index) => {
+    const metricDef = getArchiveMetricDef(metricKey);
+    if(!metricDef || !metricDef.chartable){
+      return;
+    }
+    const axisId = getMetricAxisId(metricKey, metricDef);
+    if(!axes[axisId]){
+      axes[axisId] = createAxisDescriptor(metricDef);
+    }else{
+      extendAxisDescriptor(axes[axisId], metricDef);
+    }
+    const color = ARCHIVE_CHART_COLORS[index % ARCHIVE_CHART_COLORS.length];
+    const dataset = {
+      label: metricDef.label,
+      yAxisID: axisId,
+      borderColor: color,
+      backgroundColor: applyAlphaToColor(color, 0.25),
+      tension: 0.28,
+      borderWidth: 2,
+      pointRadius: 4,
+      pointHoverRadius: 6,
+      pointBackgroundColor: color,
+      pointBorderColor: '#0f172a',
+      fill: false,
+      spanGaps: true,
+      parsing: false,
+      archiveMetricDef: metricDef,
+      archiveMetricKey: metricKey,
+      data: orderedShows.map(point => {
+        const value = metricDef.getValue(point.stats, point.show);
+        return {
+          x: point.timestamp,
+          y: isValidMetricValue(value) ? Number(value) : null,
+          showId: point.show.id
+        };
+      })
+    };
+    updateAxisDataExtents(axes[axisId], dataset.data);
+    datasets.push(dataset);
   });
 
-  ctx.strokeStyle = '#4aa3ff';
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  points.forEach((point, index) => {
-    const x = xScale(point.timestamp);
-    const y = yScale(Number(point.value));
-    if(index === 0){
-      ctx.moveTo(x, y);
-    }else{
-      ctx.lineTo(x, y);
+  return {datasets, axes};
+}
+
+function updateAxisDataExtents(descriptor, data){
+  if(!descriptor || !Array.isArray(data)){
+    return;
+  }
+  const values = data
+    .map(point => Number.isFinite(point?.y) ? Number(point.y) : null)
+    .filter(value => value !== null);
+  if(!values.length){
+    return;
+  }
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  descriptor.dataMin = typeof descriptor.dataMin === 'number' ? Math.min(descriptor.dataMin, min) : min;
+  descriptor.dataMax = typeof descriptor.dataMax === 'number' ? Math.max(descriptor.dataMax, max) : max;
+}
+
+function buildArchiveChartOptions(axisDescriptors){
+  const scales = {
+    x: {
+      type: 'time',
+      grid: { color: 'rgba(148, 163, 184, 0.18)' },
+      ticks: {
+        color: 'rgba(226, 232, 240, 0.85)',
+        maxRotation: 0,
+        autoSkipPadding: 16
+      },
+      time: {
+        tooltipFormat: 'PP p',
+        displayFormats: {
+          hour: 'MMM d ha',
+          day: 'MMM d'
+        }
+      }
+    }
+  };
+  const axisIds = Object.keys(axisDescriptors);
+  axisIds.forEach((axisId, index) => {
+    const descriptor = axisDescriptors[axisId];
+    const position = axisId === 'y-seconds' ? 'right' : 'left';
+    const drawGrid = index === 0;
+    const suggestedMin = collectAxisBound(descriptor, 'min');
+    const suggestedMax = collectAxisBound(descriptor, 'max');
+    scales[axisId] = {
+      type: 'linear',
+      position,
+      grid: {
+        drawOnChartArea: drawGrid,
+        color: drawGrid ? 'rgba(148, 163, 184, 0.18)' : 'rgba(148, 163, 184, 0.08)'
+      },
+      ticks: {
+        color: 'rgba(226, 232, 240, 0.85)',
+        padding: 8,
+        callback: value => formatChartAxisTick(descriptor, value)
+      },
+      suggestedMin,
+      suggestedMax,
+      beginAtZero: descriptor?.min === 0,
+      offset: position === 'left' && index > 0
+    };
+    if(position === 'right'){
+      scales[axisId].grid.drawOnChartArea = false;
     }
   });
-  ctx.stroke();
 
-  points.forEach(point => {
-    const x = xScale(point.timestamp);
-    const y = yScale(Number(point.value));
-    ctx.beginPath();
-    ctx.fillStyle = '#4aa3ff';
-    ctx.arc(x, y, 4, 0, Math.PI * 2);
-    ctx.fill();
-  });
+  return {
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: {
+      duration: 700,
+      easing: 'easeOutQuart'
+    },
+    interaction: {
+      mode: 'index',
+      intersect: false
+    },
+    plugins: {
+      legend: {
+        labels: {
+          color: '#f8fafc',
+          usePointStyle: true,
+          boxWidth: 12
+        }
+      },
+      tooltip: {
+        backgroundColor: 'rgba(15, 23, 42, 0.92)',
+        borderColor: 'rgba(59, 130, 246, 0.45)',
+        borderWidth: 1,
+        callbacks: {
+          title: items => formatArchiveTooltipTitle(items?.[0]?.parsed?.x),
+          label: context => formatArchiveTooltipLabel(context)
+        }
+      }
+    },
+    scales
+  };
+}
 
-  ctx.font = '11px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
-  ctx.fillStyle = '#ffffff';
-  ctx.textAlign = 'left';
-  ctx.textBaseline = 'bottom';
-  points.forEach(point => {
-    const x = xScale(point.timestamp);
-    const y = yScale(Number(point.value));
-    const text = formatMetricValue(metricDef, point.value);
-    ctx.fillText(text, x + 6, y - 6);
-  });
+function collectAxisBound(descriptor, key){
+  if(!descriptor){
+    return undefined;
+  }
+  const bounds = [];
+  if(typeof descriptor[key] === 'number'){
+    bounds.push(descriptor[key]);
+  }
+  const dataKey = key === 'min' ? 'dataMin' : 'dataMax';
+  if(typeof descriptor[dataKey] === 'number'){
+    bounds.push(descriptor[dataKey]);
+  }
+  if(!bounds.length){
+    return undefined;
+  }
+  return key === 'min' ? Math.min(...bounds) : Math.max(...bounds);
+}
 
-  ctx.restore();
+function formatChartAxisTick(descriptor, value){
+  if(!descriptor){
+    return value;
+  }
+  return formatChartAxisValue({suffix: descriptor.suffix, decimals: descriptor.decimals}, value);
+}
+
+function formatArchiveTooltipTitle(value){
+  if(!Number.isFinite(value)){
+    return '';
+  }
+  try{
+    return new Date(value).toLocaleString(undefined, {
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit'
+    });
+  }catch(err){
+    return '';
+  }
+}
+
+function formatArchiveTooltipLabel(context){
+  if(!context || !context.dataset){
+    return '';
+  }
+  const dataset = context.dataset;
+  const def = dataset.archiveMetricDef || null;
+  const value = context.parsed?.y;
+  const formatted = def ? formatMetricValue(def, value) : (Number.isFinite(value) ? value : '—');
+  return `${dataset.label}: ${formatted}`;
+}
+
+function getMetricAxisId(metricKey, metricDef){
+  const suffix = typeof metricDef?.suffix === 'string' ? metricDef.suffix.trim() : '';
+  if(suffix === '%'){
+    return 'y-percent';
+  }
+  if(suffix.toLowerCase().includes('s')){
+    return 'y-seconds';
+  }
+  return `y-${metricKey}`;
+}
+
+function createAxisDescriptor(metricDef){
+  return {
+    suffix: typeof metricDef?.suffix === 'string' ? metricDef.suffix : '',
+    min: typeof metricDef?.min === 'number' ? metricDef.min : undefined,
+    max: typeof metricDef?.max === 'number' ? metricDef.max : undefined,
+    decimals: typeof metricDef?.decimals === 'number' ? metricDef.decimals : 0,
+    dataMin: undefined,
+    dataMax: undefined
+  };
+}
+
+function extendAxisDescriptor(descriptor, metricDef){
+  if(!descriptor){
+    return;
+  }
+  if(typeof metricDef?.min === 'number'){
+    descriptor.min = typeof descriptor.min === 'number' ? Math.min(descriptor.min, metricDef.min) : metricDef.min;
+  }
+  if(typeof metricDef?.max === 'number'){
+    descriptor.max = typeof descriptor.max === 'number' ? Math.max(descriptor.max, metricDef.max) : metricDef.max;
+  }
+  const decimals = typeof metricDef?.decimals === 'number' ? metricDef.decimals : 0;
+  descriptor.decimals = Math.max(descriptor.decimals || 0, decimals);
+}
+
+function applyAlphaToColor(color, alpha){
+  if(typeof color !== 'string'){
+    return `rgba(34, 197, 94, ${Math.max(0, Math.min(1, alpha || 0))})`;
+  }
+  const hex = color.replace('#', '');
+  if(hex.length !== 6){
+    const normalized = Math.max(0, Math.min(1, alpha || 0));
+    return `rgba(37, 99, 235, ${normalized})`;
+  }
+  const r = Number.parseInt(hex.slice(0, 2), 16);
+  const g = Number.parseInt(hex.slice(2, 4), 16);
+  const b = Number.parseInt(hex.slice(4, 6), 16);
+  const normalized = Math.max(0, Math.min(1, Number(alpha) || 0));
+  return `rgba(${r}, ${g}, ${b}, ${normalized})`;
 }
 
 function renderArchiveDetails(show){
