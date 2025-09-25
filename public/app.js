@@ -18,6 +18,82 @@ const EXPORT_COLUMNS = [
   'entryId','unitId','planned','launched','status','primaryIssue','subIssue','otherDetail',
   'severity','rootCause','actions','operator','batteryId','delaySec','commandRx','notes'
 ];
+const ARCHIVE_METRIC_DEFS = {
+  entriesCount: {
+    label: 'Entries logged',
+    getValue: stats => stats.totalEntries,
+    decimals: 0,
+    min: 0,
+    chartable: true
+  },
+  completedCount: {
+    label: 'Completed flights',
+    getValue: stats => stats.completedCount,
+    decimals: 0
+  },
+  noLaunchCount: {
+    label: 'No-launch events',
+    getValue: stats => stats.noLaunchCount,
+    decimals: 0
+  },
+  abortCount: {
+    label: 'Abort events',
+    getValue: stats => stats.abortCount,
+    decimals: 0
+  },
+  avgDelaySec: {
+    label: 'Average delay (s)',
+    getValue: stats => stats.avgDelaySec,
+    decimals: 1,
+    min: 0,
+    chartable: true,
+    suffix: ' s'
+  },
+  maxDelaySec: {
+    label: 'Max delay (s)',
+    getValue: stats => stats.maxDelaySec,
+    decimals: 1,
+    min: 0,
+    suffix: ' s'
+  },
+  completionRate: {
+    label: 'Completion rate (%)',
+    getValue: stats => stats.completionRate,
+    decimals: 0,
+    suffix: '%',
+    min: 0,
+    max: 100,
+    chartable: true
+  },
+  launchRate: {
+    label: 'Launch rate (%)',
+    getValue: stats => stats.launchRate,
+    decimals: 0,
+    suffix: '%',
+    min: 0,
+    max: 100,
+    chartable: true
+  },
+  abortRate: {
+    label: 'Abort rate (%)',
+    getValue: stats => stats.abortRate,
+    decimals: 0,
+    suffix: '%',
+    min: 0,
+    max: 100,
+    chartable: true
+  }
+};
+const ARCHIVE_SUMMARY_KEYS = [
+  'entriesCount',
+  'completedCount',
+  'noLaunchCount',
+  'abortCount',
+  'avgDelaySec',
+  'maxDelaySec',
+  'launchRate',
+  'completionRate'
+];
 
 function createEmptyShowDraft(){
   return {
@@ -45,6 +121,7 @@ const state = {
   isCreatingShow: false,
   archivedShows: [],
   currentArchivedShowId: null,
+  selectedArchiveChartShows: [],
   webhookConfig: {
     enabled: false,
     url: '',
@@ -145,6 +222,11 @@ const archiveMeta = el('archiveMeta');
 const archiveEmpty = el('archiveEmpty');
 const archiveExportCsvBtn = el('archiveExportCsv');
 const archiveExportJsonBtn = el('archiveExportJson');
+const archiveStats = el('archiveStats');
+const archiveStatSelect = el('archiveStatSelect');
+const archiveStatShowList = el('archiveStatShowList');
+const archiveStatCanvas = el('archiveStatCanvas');
+const archiveStatEmpty = el('archiveStatEmpty');
 const refreshArchiveBtn = el('refreshArchive');
 const connectionStatusEl = el('connectionStatus');
 const providerBadge = el('providerBadge');
@@ -239,6 +321,12 @@ function initUI(){
   }
   if(archiveExportJsonBtn){
     archiveExportJsonBtn.addEventListener('click', ()=> exportSelectedArchive('json'));
+  }
+  if(archiveStatSelect){
+    archiveStatSelect.addEventListener('change', renderArchiveChart);
+  }
+  if(archiveStatShowList){
+    archiveStatShowList.addEventListener('change', onArchiveChartShowToggle);
   }
   if(roleHomeBtn){
     roleHomeBtn.addEventListener('click', ()=> setView('landing'));
@@ -450,6 +538,7 @@ async function loadArchivedShows(options = {}){
     const shows = Array.isArray(data.shows) ? data.shows.map(normalizeArchivedShow) : [];
     shows.sort((a, b)=> (Number.isFinite(b.archivedAt) ? b.archivedAt : 0) - (Number.isFinite(a.archivedAt) ? a.archivedAt : 0));
     state.archivedShows = shows;
+    syncArchiveChartSelection();
     if(preserveSelection){
       const hasCurrent = state.currentArchivedShowId && state.archivedShows.some(show=>show.id === state.currentArchivedShowId);
       if(!hasCurrent){
@@ -459,6 +548,8 @@ async function loadArchivedShows(options = {}){
       state.currentArchivedShowId = state.archivedShows[0]?.id || null;
     }
     renderArchiveSelect();
+    renderArchiveChartControls();
+    renderArchiveChart();
     return true;
   }catch(err){
     console.error('Failed to load archive', err);
@@ -468,7 +559,10 @@ async function loadArchivedShows(options = {}){
     if(!preserveSelection){
       state.archivedShows = [];
       state.currentArchivedShowId = null;
+      state.selectedArchiveChartShows = [];
       renderArchiveSelect();
+      renderArchiveChartControls();
+      renderArchiveChart();
     }
     return false;
   }
@@ -725,7 +819,10 @@ function renderArchiveSelect(){
     if(archiveMeta){
       archiveMeta.textContent = 'Shows archive will populate once daily records are archived.';
     }
+    renderArchiveStats(null);
     renderArchiveDetails(null);
+    renderArchiveChartControls();
+    renderArchiveChart();
     return;
   }
   archiveShowSelect.disabled = false;
@@ -754,7 +851,9 @@ function setCurrentArchivedShow(showId, options = {}){
       archiveShowSelect.value = '';
     }
   }
-  renderArchiveDetails(getArchivedShow(state.currentArchivedShowId));
+  const show = getArchivedShow(state.currentArchivedShowId);
+  renderArchiveStats(show);
+  renderArchiveDetails(show);
 }
 
 function getArchivedShow(showId){
@@ -762,6 +861,255 @@ function getArchivedShow(showId){
     return null;
   }
   return state.archivedShows.find(show=>show.id === showId) || null;
+}
+
+function renderArchiveStats(show){
+  if(!archiveStats){
+    return;
+  }
+  if(!show){
+    archiveStats.innerHTML = '<p class="help">Select an archived show to view summary statistics.</p>';
+    return;
+  }
+  const stats = computeArchiveShowStats(show);
+  const items = ARCHIVE_SUMMARY_KEYS.map(key => {
+    const def = getArchiveMetricDef(key);
+    if(!def){
+      return '';
+    }
+    const value = def.getValue(stats, show);
+    const formatted = formatMetricValue(def, value);
+    return `<div><dt>${escapeHtml(def.label)}</dt><dd>${escapeHtml(formatted)}</dd></div>`;
+  }).filter(Boolean);
+  if(items.length){
+    archiveStats.innerHTML = `
+      <h3>Show statistics</h3>
+      <dl>${items.join('')}</dl>
+    `;
+  }else{
+    archiveStats.innerHTML = `
+      <h3>Show statistics</h3>
+      <p class="help">Statistics will populate once entries are recorded for this show.</p>
+    `;
+  }
+}
+
+function renderArchiveChartControls(){
+  if(!archiveStatShowList){
+    return;
+  }
+  const shows = Array.isArray(state.archivedShows) ? state.archivedShows : [];
+  if(!shows.length){
+    archiveStatShowList.innerHTML = '<p class="help">No archived shows available yet.</p>';
+    if(archiveStatEmpty){
+      archiveStatEmpty.hidden = false;
+      archiveStatEmpty.textContent = 'Archive data will appear once shows are archived.';
+    }
+    return;
+  }
+  const selected = new Set(Array.isArray(state.selectedArchiveChartShows) ? state.selectedArchiveChartShows : []);
+  const markup = shows.map(show => {
+    const label = buildArchiveShowLabel(show);
+    const checked = selected.has(show.id) ? ' checked' : '';
+    const showId = escapeHtml(show.id || '');
+    return `<label><input type="checkbox" data-show-id="${showId}"${checked}> ${escapeHtml(label)}</label>`;
+  }).join('');
+  archiveStatShowList.innerHTML = markup || '<p class="help">No archived shows available yet.</p>';
+  if(archiveStatEmpty){
+    archiveStatEmpty.textContent = 'Select one or more shows to render the chart.';
+  }
+}
+
+function onArchiveChartShowToggle(event){
+  const target = event.target;
+  if(!target || target.type !== 'checkbox' || !target.dataset.showId){
+    return;
+  }
+  const showId = target.dataset.showId;
+  const selection = new Set(Array.isArray(state.selectedArchiveChartShows) ? state.selectedArchiveChartShows : []);
+  if(target.checked){
+    selection.add(showId);
+  }else{
+    selection.delete(showId);
+  }
+  state.selectedArchiveChartShows = Array.from(selection);
+  renderArchiveChart();
+}
+
+function renderArchiveChart(){
+  if(!archiveStatCanvas){
+    return;
+  }
+  const ctx = archiveStatCanvas.getContext('2d');
+  if(!ctx){
+    return;
+  }
+  const metricKey = (archiveStatSelect && ARCHIVE_METRIC_DEFS[archiveStatSelect.value])
+    ? archiveStatSelect.value
+    : 'entriesCount';
+  if(archiveStatSelect && archiveStatSelect.value !== metricKey){
+    archiveStatSelect.value = metricKey;
+  }
+  const metricDef = getArchiveMetricDef(metricKey) || getArchiveMetricDef('entriesCount');
+  const selectedIds = new Set(Array.isArray(state.selectedArchiveChartShows) ? state.selectedArchiveChartShows : []);
+  const shows = Array.isArray(state.archivedShows) ? state.archivedShows.filter(show => selectedIds.has(show.id)) : [];
+  const points = shows.map(show => {
+    const stats = computeArchiveShowStats(show);
+    const value = metricDef ? metricDef.getValue(stats, show) : null;
+    return {
+      show,
+      stats,
+      value,
+      timestamp: getShowTimestamp(show)
+    };
+  }).filter(point => isValidMetricValue(point.value) && point.timestamp !== null);
+  points.sort((a, b)=> a.timestamp - b.timestamp);
+
+  const ratio = window.devicePixelRatio || 1;
+  const displayWidth = archiveStatCanvas.clientWidth || archiveStatCanvas.width || 600;
+  const displayHeight = archiveStatCanvas.clientHeight || archiveStatCanvas.height || 260;
+  if(archiveStatCanvas.width !== displayWidth * ratio){
+    archiveStatCanvas.width = displayWidth * ratio;
+  }
+  if(archiveStatCanvas.height !== displayHeight * ratio){
+    archiveStatCanvas.height = displayHeight * ratio;
+  }
+  ctx.save();
+  ctx.scale(ratio, ratio);
+  ctx.clearRect(0, 0, displayWidth, displayHeight);
+
+  if(!points.length){
+    ctx.restore();
+    if(archiveStatEmpty){
+      archiveStatEmpty.hidden = false;
+      archiveStatEmpty.textContent = selectedIds.size
+        ? 'Selected shows do not have data for this statistic yet.'
+        : 'Select one or more shows to render the chart.';
+    }
+    return;
+  }
+
+  if(archiveStatEmpty){
+    archiveStatEmpty.hidden = true;
+  }
+
+  archiveStatCanvas.setAttribute('aria-label', `${metricDef ? metricDef.label : 'Archive statistic'} over time`);
+
+  const padding = {top: 28, right: 24, bottom: 56, left: 68};
+  const innerWidth = Math.max(10, displayWidth - padding.left - padding.right);
+  const innerHeight = Math.max(10, displayHeight - padding.top - padding.bottom);
+
+  const xValues = points.map(point => point.timestamp);
+  const yValues = points.map(point => Number(point.value));
+  let xMin = Math.min(...xValues);
+  let xMax = Math.max(...xValues);
+  if(xMax === xMin){
+    const offset = 60 * 60 * 1000;
+    xMin -= offset;
+    xMax += offset;
+  }
+  let yMin = Math.min(...yValues);
+  let yMax = Math.max(...yValues);
+  if(metricDef && typeof metricDef.min === 'number'){
+    yMin = Math.min(yMin, metricDef.min);
+  }
+  if(metricDef && typeof metricDef.max === 'number'){
+    yMax = Math.max(yMax, metricDef.max);
+  }
+  if(yMax === yMin){
+    const pad = yMax === 0 ? 1 : Math.abs(yMax) * 0.1;
+    yMax += pad;
+    yMin = yMin - pad;
+  }
+  if(metricDef && typeof metricDef.min === 'number' && yMin < metricDef.min){
+    yMin = metricDef.min;
+  }
+  if(metricDef && typeof metricDef.max === 'number' && yMax < metricDef.max){
+    yMax = metricDef.max;
+  }
+  if(yMax === yMin){
+    yMax = yMin + 1;
+  }
+  const xScale = value => padding.left + ((value - xMin) / (xMax - xMin)) * innerWidth;
+  const yScale = value => padding.top + innerHeight - ((value - yMin) / (yMax - yMin)) * innerHeight;
+
+  ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(padding.left, padding.top);
+  ctx.lineTo(padding.left, padding.top + innerHeight);
+  ctx.lineTo(padding.left + innerWidth, padding.top + innerHeight);
+  ctx.stroke();
+
+  const axisFont = '12px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+  ctx.font = axisFont;
+  ctx.fillStyle = 'rgba(255,255,255,0.65)';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  const yTicks = 4;
+  for(let i = 0; i <= yTicks; i++){
+    const t = i / yTicks;
+    const value = yMin + (yMax - yMin) * t;
+    const y = yScale(value);
+    ctx.beginPath();
+    ctx.moveTo(padding.left - 6, y);
+    ctx.lineTo(padding.left, y);
+    ctx.stroke();
+    const label = formatChartAxisValue(metricDef, value);
+    ctx.fillText(label, 8, y);
+  }
+
+  const dateFormatter = formatArchiveChartDate;
+  ctx.textBaseline = 'top';
+  ctx.textAlign = 'right';
+  points.forEach(point => {
+    const x = xScale(point.timestamp);
+    ctx.beginPath();
+    ctx.moveTo(x, padding.top + innerHeight);
+    ctx.lineTo(x, padding.top + innerHeight + 6);
+    ctx.stroke();
+    ctx.save();
+    ctx.translate(x, padding.top + innerHeight + 8);
+    ctx.rotate(-Math.PI / 4);
+    ctx.fillText(dateFormatter(point.timestamp), 0, 0);
+    ctx.restore();
+  });
+
+  ctx.strokeStyle = '#4aa3ff';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  points.forEach((point, index) => {
+    const x = xScale(point.timestamp);
+    const y = yScale(Number(point.value));
+    if(index === 0){
+      ctx.moveTo(x, y);
+    }else{
+      ctx.lineTo(x, y);
+    }
+  });
+  ctx.stroke();
+
+  points.forEach(point => {
+    const x = xScale(point.timestamp);
+    const y = yScale(Number(point.value));
+    ctx.beginPath();
+    ctx.fillStyle = '#4aa3ff';
+    ctx.arc(x, y, 4, 0, Math.PI * 2);
+    ctx.fill();
+  });
+
+  ctx.font = '11px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+  ctx.fillStyle = '#ffffff';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'bottom';
+  points.forEach(point => {
+    const x = xScale(point.timestamp);
+    const y = yScale(Number(point.value));
+    const text = formatMetricValue(metricDef, point.value);
+    ctx.fillText(text, x + 6, y - 6);
+  });
+
+  ctx.restore();
 }
 
 function renderArchiveDetails(show){
@@ -889,6 +1237,178 @@ function renderArchiveEntry(entry, index){
       ${notesSection}
     </article>
   `;
+}
+
+function computeArchiveShowStats(show){
+  const entries = Array.isArray(show?.entries) ? show.entries : [];
+  let completedCount = 0;
+  let noLaunchCount = 0;
+  let abortCount = 0;
+  let launchedCount = 0;
+  const delayValues = [];
+  for(const entry of entries){
+    const status = String(entry?.status || '').toLowerCase();
+    if(status === 'completed'){
+      completedCount += 1;
+    }else if(status === 'no-launch'){
+      noLaunchCount += 1;
+    }else if(status === 'abort'){
+      abortCount += 1;
+    }
+    if(String(entry?.launched || '').toLowerCase() === 'yes'){
+      launchedCount += 1;
+    }
+    if(Number.isFinite(entry?.delaySec)){
+      delayValues.push(entry.delaySec);
+    }
+  }
+  const totalEntries = entries.length;
+  const delaySum = delayValues.reduce((sum, value)=> sum + value, 0);
+  const avgDelaySec = delayValues.length ? delaySum / delayValues.length : null;
+  const maxDelaySec = delayValues.length ? Math.max(...delayValues) : null;
+  const completionRate = totalEntries ? (completedCount / totalEntries) * 100 : null;
+  const launchRate = totalEntries ? (launchedCount / totalEntries) * 100 : null;
+  const abortRate = totalEntries ? (abortCount / totalEntries) * 100 : null;
+  return {
+    totalEntries,
+    completedCount,
+    noLaunchCount,
+    abortCount,
+    launchedCount,
+    avgDelaySec,
+    maxDelaySec,
+    completionRate,
+    launchRate,
+    abortRate
+  };
+}
+
+function getArchiveMetricDef(key){
+  return ARCHIVE_METRIC_DEFS[key] || null;
+}
+
+function formatMetricValue(def, value){
+  if(value === null || value === undefined || Number.isNaN(value)){
+    return '—';
+  }
+  const decimals = typeof def?.decimals === 'number' ? def.decimals : 0;
+  const number = Number(value);
+  if(!Number.isFinite(number)){
+    return '—';
+  }
+  const formatted = number.toLocaleString(undefined, {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals
+  });
+  return def?.suffix ? `${formatted}${def.suffix}` : formatted;
+}
+
+function formatChartAxisValue(def, value){
+  if(value === null || value === undefined || Number.isNaN(value)){
+    return '';
+  }
+  const decimals = typeof def?.decimals === 'number' ? Math.min(def.decimals, 2) : 0;
+  const number = Number(value);
+  if(!Number.isFinite(number)){
+    return '';
+  }
+  const formatted = number.toLocaleString(undefined, {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals
+  });
+  const suffix = typeof def?.suffix === 'string' ? def.suffix.trim() : '';
+  if(!suffix){
+    return formatted;
+  }
+  if(suffix === '%'){
+    return `${formatted}%`;
+  }
+  return `${formatted} ${suffix}`;
+}
+
+function formatArchiveChartDate(timestamp){
+  if(!Number.isFinite(timestamp)){
+    return '';
+  }
+  try{
+    return new Date(timestamp).toLocaleDateString(undefined, {
+      month: 'short',
+      day: 'numeric'
+    });
+  }catch(err){
+    return '';
+  }
+}
+
+function buildArchiveShowLabel(show){
+  if(!show){
+    return '';
+  }
+  const date = formatDateUS(show.date) || show.date || 'Unknown date';
+  const time = formatTime12Hour(show.time) || '';
+  const label = show.label ? ` • ${show.label}` : '';
+  return `${date}${time ? ` • ${time}` : ''}${label}`;
+}
+
+function getShowTimestamp(show){
+  if(!show){
+    return null;
+  }
+  if(Number.isFinite(show.createdAt)){
+    return show.createdAt;
+  }
+  const parsed = parseShowDateTime(show.date, show.time);
+  if(parsed !== null){
+    return parsed;
+  }
+  if(Number.isFinite(show.archivedAt)){
+    return show.archivedAt;
+  }
+  if(Array.isArray(show.entries) && show.entries.length){
+    const sorted = show.entries
+      .map(entry => Number.isFinite(entry.ts) ? entry.ts : null)
+      .filter(ts => ts !== null)
+      .sort((a, b)=> a - b);
+    if(sorted.length){
+      return sorted[0];
+    }
+  }
+  return null;
+}
+
+function parseShowDateTime(dateStr, timeStr){
+  if(typeof dateStr !== 'string' || !dateStr){
+    return null;
+  }
+  const time = (typeof timeStr === 'string' && timeStr) ? timeStr : '00:00';
+  const iso = `${dateStr}T${time}`;
+  const ts = Date.parse(iso);
+  return Number.isFinite(ts) ? ts : null;
+}
+
+function isValidMetricValue(value){
+  if(value === null || value === undefined){
+    return false;
+  }
+  const number = Number(value);
+  return Number.isFinite(number);
+}
+
+function syncArchiveChartSelection(){
+  const shows = Array.isArray(state.archivedShows) ? state.archivedShows : [];
+  const existing = Array.isArray(state.selectedArchiveChartShows) ? state.selectedArchiveChartShows : [];
+  const available = new Set(shows.map(show => show.id));
+  const nextSelection = existing.filter(id => available.has(id));
+  if(!nextSelection.length && shows.length){
+    const defaultShows = shows.slice(0, Math.min(5, shows.length));
+    defaultShows.forEach(show => {
+      if(show && !nextSelection.includes(show.id)){
+        nextSelection.push(show.id);
+      }
+    });
+  }
+  const unique = Array.from(new Set(nextSelection));
+  state.selectedArchiveChartShows = unique;
 }
 
 function exportSelectedArchive(format){
