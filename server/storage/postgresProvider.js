@@ -764,20 +764,48 @@ class PostgresProvider {
   _buildPoolConfig(){
     const cfg = this.config || {};
     const poolConfig = {...(cfg.pool || {})};
+    const envConnectionString = process.env.DATABASE_URL || process.env.POSTGRES_URL || process.env.PGURL;
     if(cfg.connectionString){
       poolConfig.connectionString = cfg.connectionString;
-    }else if(process.env.DATABASE_URL){
-      poolConfig.connectionString = process.env.DATABASE_URL;
+    }else if(envConnectionString){
+      poolConfig.connectionString = envConnectionString;
     }
+    const envHost = process.env.PGHOST || process.env.POSTGRES_HOST;
+    const envPort = Number.parseInt(process.env.PGPORT || process.env.POSTGRES_PORT, 10);
+    const envDatabase = process.env.PGDATABASE || process.env.POSTGRES_DB;
+    const envUser = process.env.PGUSER || process.env.POSTGRES_USER;
+    const envPassword = process.env.PGPASSWORD || process.env.POSTGRES_PASSWORD;
     ['host','port','database','user','password'].forEach(key =>{
       if(cfg[key] !== undefined && cfg[key] !== null && cfg[key] !== ''){
         poolConfig[key] = cfg[key];
       }
     });
+    if(!poolConfig.host && envHost){
+      poolConfig.host = envHost;
+    }
+    if(!poolConfig.port && Number.isFinite(envPort)){
+      poolConfig.port = envPort;
+    }
+    if(!poolConfig.database && envDatabase){
+      poolConfig.database = envDatabase;
+    }
+    if(!poolConfig.user && envUser){
+      poolConfig.user = envUser;
+    }
+    if(!poolConfig.password && envPassword){
+      poolConfig.password = envPassword;
+    }
+    const envSslMode = (process.env.PGSSLMODE || process.env.POSTGRES_SSLMODE || '').toLowerCase();
     if(cfg.ssl){
       if(typeof cfg.ssl === 'object'){
         poolConfig.ssl = cfg.ssl;
       }else if(cfg.ssl === true){
+        poolConfig.ssl = {rejectUnauthorized: false};
+      }
+    }else if(envSslMode){
+      if(envSslMode === 'disable'){
+        poolConfig.ssl = false;
+      }else if(['require','prefer'].includes(envSslMode)){
         poolConfig.ssl = {rejectUnauthorized: false};
       }
     }
