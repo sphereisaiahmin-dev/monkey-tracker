@@ -56,6 +56,8 @@ Switch to the PostgreSQL provider by setting `storageProvider` to `"postgres"` i
 - `ssl` – set to `true` or provide a Node.js TLS object to enable SSL.
 - `schema` – optional schema name where the Monkey Tracker tables should be created.
 
+Environment variables using the standard PostgreSQL naming scheme (`PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, `PGDATABASE`, `PGSSLMODE`) and common alternatives (`POSTGRES_HOST`, `POSTGRES_PORT`, etc.) are also honored. These settings fill in any missing values from the config file so the server can connect when only environment variables are present.
+
 When PostgreSQL is active the UI updates the provider badge to “PostgreSQL v1” and all API responses surface the active driver in the `storageMeta` field. The server keeps feature parity with the SQL.js provider, including archive retention and roster seeding.
 
 ### Roster management
