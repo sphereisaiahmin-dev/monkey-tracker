@@ -28,10 +28,31 @@ async function bootstrap(){
     };
   }
 
+  function getStorageMetadata(){
+    try{
+      const provider = getProvider();
+      if(provider && typeof provider.getStorageMetadata === 'function'){
+        const meta = provider.getStorageMetadata();
+        if(meta && typeof meta === 'object'){
+          return {
+            label: typeof meta.label === 'string' && meta.label ? meta.label : (provider.getStorageLabel?.() || 'SQL.js v2'),
+            ...meta
+          };
+        }
+      }
+      const label = provider?.getStorageLabel?.() || 'SQL.js v2';
+      return {label};
+    }catch(err){
+      return {label: 'SQL.js v2'};
+    }
+  }
+
   app.get('/api/health', (req, res)=>{
+    const storageMeta = getStorageMetadata();
     res.json({
       status: 'ok',
-      storage: 'sql.js v2',
+      storage: storageMeta.label,
+      storageMeta,
       webhook: getWebhookStatus(),
       host: configuredHost,
       port: configuredPort,
@@ -41,7 +62,8 @@ async function bootstrap(){
   });
 
   app.get('/api/config', (req, res)=>{
-    res.json(config);
+    const storageMeta = getStorageMetadata();
+    res.json({...config, storageMeta});
   });
 
   app.put('/api/config', asyncHandler(async (req, res)=>{
@@ -57,7 +79,8 @@ async function bootstrap(){
     if(!Number.isFinite(envPort) && configuredPort !== boundPort){
       console.warn(`Configured port updated to ${configuredPort}. Restart the server to bind to the new port.`);
     }
-    res.json(config);
+    const storageMeta = getStorageMetadata();
+    res.json({...config, storageMeta});
   }));
 
   app.get('/api/staff', asyncHandler(async (req, res)=>{
@@ -75,7 +98,8 @@ async function bootstrap(){
   app.get('/api/shows', asyncHandler(async (req, res)=>{
     const provider = getProvider();
     const shows = await provider.listShows();
-    res.json({storage: 'sql.js v2', webhook: getWebhookStatus(), shows});
+    const storageMeta = getStorageMetadata();
+    res.json({storage: storageMeta.label, storageMeta, webhook: getWebhookStatus(), shows});
   }));
 
   app.get('/api/shows/archive', asyncHandler(async (req, res)=>{

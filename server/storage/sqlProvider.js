@@ -60,6 +60,18 @@ class SqlProvider {
     }
   }
 
+  getStorageLabel(){
+    return 'SQL.js v2';
+  }
+
+  getStorageMetadata(){
+    return {
+      label: this.getStorageLabel(),
+      driver: 'sqljs',
+      filename: this.filename
+    };
+  }
+
   async listShows(){
     await this._refreshArchive();
     const rows = this._select('SELECT data FROM shows ORDER BY updated_at DESC');
