@@ -491,6 +491,7 @@ body.view-pilot .topbar-actions{
 .lan-target{font-size:13px;color:var(--text-dim)}
 .lan-target code{background:#10131a;padding:4px 6px;border-radius:8px;color:var(--text);border:1px solid var(--border)}
 .badge.provider-sql{background:rgba(74,163,255,.18);color:#aed4ff;border-color:rgba(74,163,255,.55)}
+.badge.provider-pg{background:rgba(60,136,199,.2);color:#b6d9ff;border-color:rgba(60,136,199,.6)}
 .badge.badge-webhook-on{background:rgba(31,198,122,.22);color:#bef8dd;border-color:rgba(31,198,122,.55);animation:pulseGlow 2.6s ease-in-out infinite}
 .badge.badge-webhook-off{background:rgba(255,255,255,.06);color:var(--text-dim);border-color:rgba(255,255,255,.12);border-style:dashed}
 .btn[disabled]{opacity:.6;cursor:not-allowed}

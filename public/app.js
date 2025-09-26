@@ -119,6 +119,7 @@ const state = {
   serverHost: '10.241.211.120',
   serverPort: 3000,
   storageLabel: 'SQL.js storage v2',
+  storageMeta: null,
   newShowDraft: createEmptyShowDraft(),
   showHeaderShowErrors: false,
   isCreatingShow: false,
@@ -490,7 +491,11 @@ async function loadConfig(){
   const portFromConfig = Number.parseInt(data.port, 10);
   state.serverPort = Number.isFinite(portFromConfig) ? portFromConfig : state.serverPort;
   state.unitLabel = data.unitLabel || 'Drone';
-  state.storageLabel = 'SQL.js storage v2';
+  const storageMeta = (data.storageMeta && typeof data.storageMeta === 'object')
+    ? data.storageMeta
+    : (typeof data.storage === 'object' ? data.storage : null);
+  state.storageMeta = storageMeta || (typeof data.storage === 'string' ? {label: data.storage} : null);
+  state.storageLabel = resolveStorageLabel(state.storageMeta || data.storage || state.storageLabel);
   state.webhookConfig = {
     enabled: Boolean(data.webhook?.enabled),
     url: data.webhook?.url || '',
@@ -508,7 +513,7 @@ async function loadConfig(){
   unitLabelEl.textContent = state.unitLabel;
   unitLabelSelect.value = state.unitLabel;
   setLanAddress();
-  setProviderBadge(state.storageLabel);
+  setProviderBadge(state.storageMeta || state.storageLabel);
   setWebhookBadge(state.webhookStatus);
   refreshWebhookUi();
 }
@@ -540,7 +545,9 @@ async function loadShows(){
   try{
     const previousId = state.currentShowId;
     const data = await apiRequest('/api/shows');
-    state.storageLabel = 'SQL.js storage v2';
+    const storageMeta = (data.storageMeta && typeof data.storageMeta === 'object') ? data.storageMeta : null;
+    state.storageMeta = storageMeta || (typeof data.storage === 'string' ? {label: data.storage} : state.storageMeta);
+    state.storageLabel = resolveStorageLabel(state.storageMeta || data.storage || state.storageLabel);
     state.webhookStatus = {
       enabled: Boolean(data.webhook?.enabled),
       method: (data.webhook?.method || state.webhookStatus.method || 'POST').toUpperCase(),
@@ -3602,7 +3609,11 @@ async function onConfigSubmit(event){
     state.serverHost = updated.host || state.serverHost;
     const nextPort = Number.parseInt(updated.port, 10);
     state.serverPort = Number.isFinite(nextPort) ? nextPort : state.serverPort;
-    state.storageLabel = 'SQL.js storage v2';
+    const updatedStorageMeta = (updated.storageMeta && typeof updated.storageMeta === 'object')
+      ? updated.storageMeta
+      : (typeof updated.storage === 'object' ? updated.storage : null);
+    state.storageMeta = updatedStorageMeta || (typeof updated.storage === 'string' ? {label: updated.storage} : state.storageMeta);
+    state.storageLabel = resolveStorageLabel(state.storageMeta || updated.storage || state.storageLabel);
     state.webhookConfig = {
       enabled: Boolean(updated.webhook?.enabled),
       url: updated.webhook?.url || '',
@@ -3620,7 +3631,7 @@ async function onConfigSubmit(event){
     appTitle.textContent = state.unitLabel;
     unitLabelEl.textContent = state.unitLabel;
     setLanAddress();
-    setProviderBadge(state.storageLabel);
+    setProviderBadge(state.storageMeta || state.storageLabel);
     setWebhookBadge(state.webhookStatus);
     populateUnitOptions();
     refreshWebhookUi();
@@ -3741,13 +3752,42 @@ function setLanAddress(){
   lanAddressEl.textContent = `http://${host}:${port}`;
 }
 
+function resolveStorageLabel(source, fallback = 'SQL.js storage v2'){
+  if(source === null || source === undefined){
+    return fallback;
+  }
+  if(typeof source === 'string'){
+    const trimmed = source.trim();
+    return trimmed || fallback;
+  }
+  if(typeof source === 'object'){
+    if(typeof source.label === 'string' && source.label.trim()){
+      return source.label.trim();
+    }
+    if(typeof source.name === 'string' && source.name.trim()){
+      return source.name.trim();
+    }
+  }
+  return fallback;
+}
+
 function setProviderBadge(label){
   if(!providerBadge){ return; }
+  const meta = label && typeof label === 'object' ? label : null;
+  const text = resolveStorageLabel(meta || label);
+  const driverHint = meta?.driver ? String(meta.driver).toLowerCase() : '';
+  let badgeClass = 'provider-sql';
+  if(driverHint.includes('postgres')){
+    badgeClass = 'provider-pg';
+  }else if(driverHint.includes('sql')){
+    badgeClass = 'provider-sql';
+  }else if(text.toLowerCase().includes('postgres')){
+    badgeClass = 'provider-pg';
+  }
   Array.from(providerBadge.classList)
     .filter(cls => cls.startsWith('provider-'))
     .forEach(cls => providerBadge.classList.remove(cls));
-  providerBadge.classList.add('provider-sql');
-  const text = label || 'SQL.js storage v2';
+  providerBadge.classList.add(badgeClass);
   providerBadge.textContent = text;
   providerBadge.setAttribute('aria-label', `Active storage provider: ${text}`);
 }
@@ -3767,12 +3807,12 @@ function updateConnectionIndicator(status){
   if(!connectionStatusEl){ return; }
   const host = state.serverHost || '10.241.211.120';
   const port = state.serverPort || 3000;
-  const storageLabel = state.storageLabel || 'SQL.js storage v2';
+  const storageLabel = resolveStorageLabel(state.storageLabel);
   const webhookLabel = state.webhookStatus?.enabled
     ? `Webhook ${state.webhookStatus.method || 'POST'}`
     : 'Webhook disabled';
   setLanAddress();
-  setProviderBadge(storageLabel);
+  setProviderBadge(state.storageMeta || storageLabel);
   setWebhookBadge(state.webhookStatus);
   connectionStatusEl.classList.remove('is-error', 'is-pending');
   let message = '';
