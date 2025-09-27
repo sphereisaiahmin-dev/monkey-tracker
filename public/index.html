@@ -41,6 +41,7 @@
         <select id="regRole" name="role" required>
           <option value="pilot">Pilot</option>
           <option value="stagehand">Stagehand</option>
+          <option value="admin">Admin (superuser)</option>
         </select>
         <div class="grid auth-grid">
           <div class="col-6">
@@ -98,7 +99,7 @@
         <section class="config-section grid" data-config-section="users" aria-hidden="true">
           <div class="col-12">
             <h3>User directory</h3>
-            <p class="help">Manage pilots and stagehands. These accounts power the crew &amp; lead lists.</p>
+            <p class="help">Manage pilots, stagehands, and admins. These accounts power the crew &amp; lead lists.</p>
           </div>
           <div class="col-12">
             <div id="userList" class="user-list" role="list"></div>
@@ -120,6 +121,7 @@
                 <select id="userRole">
                   <option value="pilot">Pilot</option>
                   <option value="stagehand">Stagehand</option>
+                  <option value="admin">Admin (superuser)</option>
                 </select>
               </div>
               <div class="col-6">
@@ -183,7 +185,7 @@
     <div id="appMain" class="app-main">
       <div class="topbar" role="banner">
         <div class="toolbar topbar-toolbar">
-          <div class="topbar-actions">
+          <div class="topbar-left">
             <button id="configBtn" class="btn icon-btn hamburger-btn" aria-haspopup="dialog" aria-expanded="false" aria-controls="configPanel" title="Open settings">
               <span class="hamburger-icon" aria-hidden="true">
                 <span></span>
@@ -193,17 +195,19 @@
               <span class="sr-only">Open settings</span>
             </button>
             <button id="roleHome" class="btn ghost" type="button">← Choose workspace</button>
+            <img src="./assets/Sphere%20Logo_RGB%20_White.png" alt="Sphere" class="app-logo" />
+          </div>
+          <div class="topbar-right">
+            <div class="topbar-title">
+              <span id="viewBadge" class="view-badge">Lead workspace</span>
+              <div class="title-stack">
+                <h1 class="app-title">Flight Log Form</h1>
+                <span class="title-sub">Tracking <span id="appTitle">Drone</span> activity</span>
+              </div>
+            </div>
             <div class="topbar-user" aria-live="polite">
               <span id="currentUserLabel" class="user-label"></span>
               <button id="logoutBtn" class="btn ghost small" type="button">Sign out</button>
-            </div>
-          </div>
-          <img src="./assets/Sphere%20Logo_RGB%20_White.png" alt="Sphere" class="app-logo" />
-          <div class="topbar-title">
-            <span id="viewBadge" class="view-badge">Lead workspace</span>
-            <div class="title-stack">
-              <h1 class="app-title">Flight Log Form</h1>
-              <span class="title-sub">Tracking <span id="appTitle">Drone</span> activity</span>
             </div>
           </div>
         </div>
@@ -211,6 +215,7 @@
 
       <div class="container" role="main">
     <section id="landingView" class="panel landing-panel view-landing-only" aria-labelledby="landingTitle">
+      <p id="landingWelcome" class="landing-welcome" hidden></p>
       <h2 id="landingTitle">Choose workspace</h2>
       <p class="lead">Select the role you need for this session.</p>
       <div class="role-options">

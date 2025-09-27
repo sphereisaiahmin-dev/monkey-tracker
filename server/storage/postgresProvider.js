@@ -9,7 +9,8 @@ const DEFAULT_USERS = [
   {email: 'Alexander.Brodnik@thesphere.com', role: 'pilot', password: 'admin'},
   {email: 'Robert.Ontell@thesphere.com', role: 'pilot', password: 'admin'},
   {email: 'Cleo.Kelley@thesphere.com', role: 'stagehand', password: 'admin'},
-  {email: 'Bret.Tuttle@thesphere.com', role: 'stagehand', password: 'admin'}
+  {email: 'Bret.Tuttle@thesphere.com', role: 'stagehand', password: 'admin'},
+  {email: 'Admin.Superuser@thesphere.com', role: 'admin', password: 'admin'}
 ];
 
 const PASSWORD_ITERATIONS = 120_000;
@@ -1094,7 +1095,13 @@ class PostgresProvider {
 
   _normalizeUserRole(role){
     const value = typeof role === 'string' ? role.trim().toLowerCase() : '';
-    return value === 'pilot' ? 'pilot' : 'stagehand';
+    if(value === 'pilot'){
+      return 'pilot';
+    }
+    if(value === 'admin'){
+      return 'admin';
+    }
+    return 'stagehand';
   }
 
   _assertSphereEmail(email){
