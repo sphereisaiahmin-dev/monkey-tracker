@@ -118,7 +118,7 @@ const state = {
   editingEntryRef: null,
   serverHost: '10.241.211.120',
   serverPort: 3000,
-  storageLabel: 'SQL.js storage v2',
+  storageLabel: 'PostgreSQL storage v1',
   storageMeta: null,
   newShowDraft: createEmptyShowDraft(),
   showHeaderShowErrors: false,
@@ -3752,7 +3752,7 @@ function setLanAddress(){
   lanAddressEl.textContent = `http://${host}:${port}`;
 }
 
-function resolveStorageLabel(source, fallback = 'SQL.js storage v2'){
+function resolveStorageLabel(source, fallback = 'PostgreSQL storage v1'){
   if(source === null || source === undefined){
     return fallback;
   }
@@ -3776,7 +3776,7 @@ function setProviderBadge(label){
   const meta = label && typeof label === 'object' ? label : null;
   const text = resolveStorageLabel(meta || label);
   const driverHint = meta?.driver ? String(meta.driver).toLowerCase() : '';
-  let badgeClass = 'provider-sql';
+  let badgeClass = 'provider-pg';
   if(driverHint.includes('postgres')){
     badgeClass = 'provider-pg';
   }else if(driverHint.includes('sql')){

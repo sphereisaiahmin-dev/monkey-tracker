@@ -1,12 +1,12 @@
 # Drone Tracker Web Application
 
-This project exposes the **Drone Tracker** interface as a full web application built with Express.js and a modular data layer. The UI is re-engineered from the original `Drone_Tracker_v0.8.5.html` file and now persists show data using a local SQL.js (WebAssembly) database while optionally forwarding each entry to a configurable webhook.
+This project exposes the **Drone Tracker** interface as a full web application built with Express.js and a modular data layer. The UI is re-engineered from the original `Drone_Tracker_v0.8.5.html` file and now persists show data in PostgreSQL while optionally forwarding each entry to a configurable webhook.
 
 ## Features
 
 - Full-featured front-end built with HTML and CSS that retains the original look-and-feel and now surfaces a LAN connection dashboard for quick status checks.
 - Express.js backend API that manages shows, entries, and configuration.
-- Modular storage provider with SQL.js (default) and PostgreSQL backends. The SQL.js driver keeps zero-dependency persistence while PostgreSQL enables multi-user deployments.
+- PostgreSQL storage provider with automatic schema provisioning, archive retention, and JSON-backed snapshots for show history.
 - Configurable application settings from the in-app settings panel (unit label, webhook delivery settings, and roster management).
 - Optional per-entry webhook export that mirrors the CSV column structure so downstream tables align perfectly with local exports.
 - Archive workspace that retains shows for two months and supports CSV/JSON exports.
@@ -30,7 +30,7 @@ This project exposes the **Drone Tracker** interface as a full web application b
 
    The app runs on [http://10.241.211.120:3000](http://10.241.211.120:3000) out of the box. Set the `HOST` and `PORT` environment variables before launching if you need a different binding (for example `HOST=0.0.0.0 node server/index.js`).
 
-3. Open the settings panel (hamburger button) to adjust the unit label, manage pilot/monkey lead/crew rosters, or to enable the webhook exporter. By default the app uses SQLite-on-WASM and stores data in `data/monkey-tracker.sqlite`.
+3. Open the settings panel (hamburger button) to adjust the unit label, manage pilot/monkey lead/crew rosters, or to enable the webhook exporter. By default the app connects to PostgreSQL using the connection information in `config/app-config.json` (or the `DATABASE_URL` environment variable) and automatically provisions any missing schema objects.
 
 ## Configuration
 
@@ -43,22 +43,16 @@ The runtime configuration is stored in `config/app-config.json` (created automat
 
 > Update these values in `config/app-config.json` (or via environment variables) and restart `node server/index.js` for changes to take effect.
 
-### SQL.js storage
-
-The SQLite database file is stored at `data/monkey-tracker.sqlite`. The directory is created if it does not exist and the file is managed automatically by the server.
-
 ### PostgreSQL storage
 
-Switch to the PostgreSQL provider by setting `storageProvider` to `"postgres"` in `config/app-config.json` (or via the in-app settings panel). The server reads connection details from the `postgres` section of the config file and from the `DATABASE_URL` environment variable. Supported keys include:
+The server always uses PostgreSQL for persistence. Connection details come from the `postgres` section of `config/app-config.json` and any relevant environment variables. Supported keys include:
 
 - `connectionString` – standard PostgreSQL connection URI. Defaults to `postgres://postgres:postgres@localhost:5432/monkey_tracker` when not provided.
 - `host`, `port`, `database`, `user`, `password` – override individual connection parameters when `connectionString` is not used.
 - `ssl` – set to `true` or provide a Node.js TLS object to enable SSL.
 - `schema` – optional schema name where the Monkey Tracker tables should be created.
 
-Environment variables using the standard PostgreSQL naming scheme (`PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, `PGDATABASE`, `PGSSLMODE`) and common alternatives (`POSTGRES_HOST`, `POSTGRES_PORT`, etc.) are also honored. These settings fill in any missing values from the config file so the server can connect when only environment variables are present.
-
-When PostgreSQL is active the UI updates the provider badge to “PostgreSQL v1” and all API responses surface the active driver in the `storageMeta` field. The server keeps feature parity with the SQL.js provider, including archive retention and roster seeding.
+Environment variables using the standard PostgreSQL naming scheme (`PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, `PGDATABASE`, `PGSSLMODE`) and common alternatives (`POSTGRES_HOST`, `POSTGRES_PORT`, etc.) are also honored. These settings fill in missing values from the config file so the server can connect even when only environment variables are provided. On startup the storage provider creates the database (if permitted), schema, tables, and indexes that power the application and logs the bootstrap actions.
 
 ### Roster management
 
@@ -92,7 +86,7 @@ The Express backend exposes the following endpoints (all JSON):
 
 - The project uses ES modules in the front-end (`public/app.js`) and CommonJS on the server.
 - Static assets are served from the `public/` directory.
-- `config/app-config.json` and `data/` are ignored by Git so that environment-specific configuration and data files stay local.
+- `config/app-config.json` is ignored by Git so that environment-specific configuration stays local.
 
 ## Original Asset
 
