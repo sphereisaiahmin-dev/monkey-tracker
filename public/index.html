@@ -7,6 +7,57 @@
   <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
+  <div id="authOverlay" class="auth-overlay" role="dialog" aria-modal="true" hidden>
+    <div class="auth-card">
+      <div class="auth-header">
+        <h1>Flight Log Access</h1>
+        <p class="help">Sign in with your thesphere.com account or create one to continue.</p>
+      </div>
+      <div class="auth-tabs" role="tablist">
+        <button id="authTabLogin" class="auth-tab is-active" type="button" role="tab" data-auth-target="login" aria-selected="true">Sign in</button>
+        <button id="authTabRegister" class="auth-tab" type="button" role="tab" data-auth-target="register" aria-selected="false">Create account</button>
+      </div>
+      <form id="loginForm" class="auth-form is-active" data-auth-form="login" autocomplete="on">
+        <label for="loginEmail">Email</label>
+        <input id="loginEmail" name="email" type="email" autocomplete="email" required placeholder="first.last@thesphere.com" />
+        <label for="loginPassword">Password</label>
+        <input id="loginPassword" name="password" type="password" autocomplete="current-password" required />
+        <button type="submit" class="btn primary auth-submit">Sign in</button>
+      </form>
+      <form id="registerForm" class="auth-form" data-auth-form="register" autocomplete="on" aria-hidden="true">
+        <div class="grid auth-grid">
+          <div class="col-6">
+            <label for="regFirstName">First name</label>
+            <input id="regFirstName" name="firstName" type="text" autocomplete="given-name" required />
+          </div>
+          <div class="col-6">
+            <label for="regLastName">Last name</label>
+            <input id="regLastName" name="lastName" type="text" autocomplete="family-name" required />
+          </div>
+        </div>
+        <label for="regEmail">Email (auto-generated)</label>
+        <input id="regEmail" name="email" type="email" readonly required />
+        <label for="regRole">Role</label>
+        <select id="regRole" name="role" required>
+          <option value="pilot">Pilot</option>
+          <option value="stagehand">Stagehand</option>
+        </select>
+        <div class="grid auth-grid">
+          <div class="col-6">
+            <label for="regPassword">Password</label>
+            <input id="regPassword" name="password" type="password" autocomplete="new-password" required />
+          </div>
+          <div class="col-6">
+            <label for="regPasswordConfirm">Confirm password</label>
+            <input id="regPasswordConfirm" name="passwordConfirm" type="password" autocomplete="new-password" required />
+          </div>
+        </div>
+        <p class="help">Emails follow the pattern <strong>first.last@thesphere.com</strong>.</p>
+        <button type="submit" class="btn primary auth-submit">Create account</button>
+      </form>
+      <div id="authMessage" class="auth-message" role="alert"></div>
+    </div>
+  </div>
   <div id="appShell" class="app-shell">
     <aside id="configPanel" class="config" role="dialog" aria-modal="true" aria-labelledby="configTitle">
       <div class="toolbar config-header">
@@ -15,6 +66,7 @@
       </div>
       <nav class="config-nav" aria-label="Settings categories">
         <button type="button" class="config-nav-btn is-active" data-config-target="lead">Lead settings</button>
+        <button type="button" class="config-nav-btn" data-config-target="users">User settings</button>
         <button type="button" class="config-nav-btn" data-config-target="admin">Admin settings</button>
       </nav>
       <div id="adminPinPrompt" class="pin-prompt" role="alertdialog" aria-modal="true" aria-labelledby="adminPinTitle" hidden>
@@ -34,7 +86,7 @@
         <section class="config-section grid is-active" data-config-section="lead">
           <fieldset id="staffFields" class="col-12 provider-fields">
             <legend>Pilots, monkey leads &amp; crew</legend>
-            <p class="help">Add one name per line. These lists feed the Lead and Pilot workspaces.</p>
+            <p class="help">These read-only lists mirror your user directory. Manage accounts from the User settings tab.</p>
             <label for="pilotList">Pilots</label>
             <textarea id="pilotList" class="list-input" placeholder="e.g., Alex"></textarea>
             <label for="monkeyLeadList">Monkey leads</label>
@@ -42,6 +94,56 @@
             <label for="crewList">Crew</label>
             <textarea id="crewList" class="list-input" placeholder="e.g., Jamie"></textarea>
           </fieldset>
+        </section>
+        <section class="config-section grid" data-config-section="users" aria-hidden="true">
+          <div class="col-12">
+            <h3>User directory</h3>
+            <p class="help">Manage pilots and stagehands. These accounts power the crew &amp; lead lists.</p>
+          </div>
+          <div class="col-12">
+            <div id="userList" class="user-list" role="list"></div>
+          </div>
+          <form class="col-12 user-form" id="userFormWrap">
+            <fieldset>
+              <legend id="userFormTitle">Create user</legend>
+              <div class="grid user-form-grid">
+                <div class="col-4">
+                  <label for="userFirstName">First name</label>
+                  <input id="userFirstName" type="text" autocomplete="off" required />
+                </div>
+              <div class="col-4">
+                <label for="userLastName">Last name</label>
+                <input id="userLastName" type="text" autocomplete="off" required />
+              </div>
+              <div class="col-4">
+                <label for="userRole">Role</label>
+                <select id="userRole">
+                  <option value="pilot">Pilot</option>
+                  <option value="stagehand">Stagehand</option>
+                </select>
+              </div>
+              <div class="col-6">
+                <label for="userEmail">Email</label>
+                <input id="userEmail" type="email" readonly />
+              </div>
+              <div class="col-3">
+                <label for="userPassword">Password</label>
+                <input id="userPassword" type="password" autocomplete="new-password" />
+              </div>
+              <div class="col-3">
+                <label for="userPasswordConfirm">Confirm password</label>
+                <input id="userPasswordConfirm" type="password" autocomplete="new-password" />
+              </div>
+            </div>
+            <div class="user-form-actions row">
+              <button type="button" id="userFormCancel" class="btn ghost" hidden>Cancel</button>
+              <button type="button" id="userFormDelete" class="btn danger" hidden>Remove user</button>
+              <div class="grow"></div>
+              <button type="submit" id="userFormSubmit" class="btn primary">Save user</button>
+            </div>
+            <p id="userFormMessage" class="help" role="status"></p>
+            </fieldset>
+          </form>
         </section>
         <section class="config-section grid" data-config-section="admin" aria-hidden="true">
           <div class="col-12">
@@ -91,6 +193,10 @@
               <span class="sr-only">Open settings</span>
             </button>
             <button id="roleHome" class="btn ghost" type="button">← Choose workspace</button>
+            <div class="topbar-user" aria-live="polite">
+              <span id="currentUserLabel" class="user-label"></span>
+              <button id="logoutBtn" class="btn ghost small" type="button">Sign out</button>
+            </div>
           </div>
           <img src="./assets/Sphere%20Logo_RGB%20_White.png" alt="Sphere" class="app-logo" />
           <div class="topbar-title">
