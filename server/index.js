@@ -35,15 +35,15 @@ async function bootstrap(){
         const meta = provider.getStorageMetadata();
         if(meta && typeof meta === 'object'){
           return {
-            label: typeof meta.label === 'string' && meta.label ? meta.label : (provider.getStorageLabel?.() || 'SQL.js v2'),
+            label: typeof meta.label === 'string' && meta.label ? meta.label : (provider.getStorageLabel?.() || 'PostgreSQL v1'),
             ...meta
           };
         }
       }
-      const label = provider?.getStorageLabel?.() || 'SQL.js v2';
+      const label = provider?.getStorageLabel?.() || 'PostgreSQL v1';
       return {label};
     }catch(err){
-      return {label: 'SQL.js v2'};
+      return {label: 'PostgreSQL v1'};
     }
   }
 

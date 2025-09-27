@@ -21,18 +21,16 @@ class PostgresProvider {
       await this.dispose();
     }
     const poolConfig = this._buildPoolConfig();
-    await this._ensureDatabaseExists(poolConfig);
+    const {databaseCreated} = await this._ensureDatabaseExists(poolConfig);
     this.pool = this._createPool(poolConfig);
     // sanity check connection
     await this.pool.query('SELECT 1');
+    this._logConnectionEstablished();
 
-    if(this.schema){
-      await this._run(`CREATE SCHEMA IF NOT EXISTS ${this._formatIdentifier(this.schema)}`);
-    }
-
-    await this._ensureSchema();
-    await this._seedDefaultStaff();
+    const schemaSummary = await this._ensureSchema();
+    const seededDefaults = await this._seedDefaultStaff();
     await this._refreshArchive();
+    this._logBootstrapSummary({databaseCreated, ...schemaSummary, seededDefaults});
   }
 
   async dispose(){
@@ -393,44 +391,109 @@ class PostgresProvider {
   }
 
   async _ensureSchema(){
+    const summary = {
+      schemaCreated: false,
+      tablesCreated: [],
+      indexesCreated: []
+    };
+    const schemaName = this.schema || 'public';
+    if(this.schema){
+      const existingSchema = await this._selectOne(
+        'SELECT schema_name FROM information_schema.schemata WHERE schema_name = $1',
+        [this.schema]
+      );
+      if(!existingSchema){
+        await this._run(`CREATE SCHEMA IF NOT EXISTS ${this._formatIdentifier(this.schema)}`);
+        summary.schemaCreated = true;
+      }
+    }
+
     const showsTable = this._table('shows');
     const staffTable = this._table('staff');
     const monkeyTable = this._table('monkey_leads');
     const archiveTable = this._table('show_archive');
-    await this._run(`
-      CREATE TABLE IF NOT EXISTS ${showsTable} (
-        id UUID PRIMARY KEY,
-        data JSONB NOT NULL,
-        updated_at TIMESTAMPTZ NOT NULL
-      )
-    `);
-    await this._run(`
-      CREATE TABLE IF NOT EXISTS ${staffTable} (
-        id UUID PRIMARY KEY,
-        name TEXT NOT NULL,
-        role TEXT NOT NULL,
-        created_at TIMESTAMPTZ NOT NULL
-      )
-    `);
-    await this._run(`
-      CREATE TABLE IF NOT EXISTS ${monkeyTable} (
-        id UUID PRIMARY KEY,
-        name TEXT NOT NULL,
-        created_at TIMESTAMPTZ NOT NULL
-      )
-    `);
-    await this._run(`
-      CREATE TABLE IF NOT EXISTS ${archiveTable} (
-        id UUID PRIMARY KEY,
-        data JSONB NOT NULL,
-        show_date TEXT,
-        created_at TIMESTAMPTZ,
-        archived_at TIMESTAMPTZ NOT NULL,
-        deleted_at TIMESTAMPTZ
-      )
-    `);
-    await this._run(`CREATE INDEX IF NOT EXISTS ${this._indexName('show_archive_archived_at_idx')} ON ${archiveTable} (archived_at DESC)`);
-    await this._run(`CREATE INDEX IF NOT EXISTS ${this._indexName('staff_role_name_idx')} ON ${staffTable} (role, name)`);
+
+    const tableDefinitions = [
+      {
+        name: 'shows',
+        ddl: `
+          CREATE TABLE IF NOT EXISTS ${showsTable} (
+            id UUID PRIMARY KEY,
+            data JSONB NOT NULL,
+            updated_at TIMESTAMPTZ NOT NULL
+          )
+        `
+      },
+      {
+        name: 'staff',
+        ddl: `
+          CREATE TABLE IF NOT EXISTS ${staffTable} (
+            id UUID PRIMARY KEY,
+            name TEXT NOT NULL,
+            role TEXT NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL
+          )
+        `
+      },
+      {
+        name: 'monkey_leads',
+        ddl: `
+          CREATE TABLE IF NOT EXISTS ${monkeyTable} (
+            id UUID PRIMARY KEY,
+            name TEXT NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL
+          )
+        `
+      },
+      {
+        name: 'show_archive',
+        ddl: `
+          CREATE TABLE IF NOT EXISTS ${archiveTable} (
+            id UUID PRIMARY KEY,
+            data JSONB NOT NULL,
+            show_date TEXT,
+            created_at TIMESTAMPTZ,
+            archived_at TIMESTAMPTZ NOT NULL,
+            deleted_at TIMESTAMPTZ
+          )
+        `
+      }
+    ];
+
+    for(const definition of tableDefinitions){
+      const exists = await this._selectOne(
+        `SELECT 1 FROM information_schema.tables WHERE table_schema = $1 AND table_name = $2`,
+        [schemaName, definition.name]
+      );
+      if(!exists){
+        await this._run(definition.ddl);
+        summary.tablesCreated.push(definition.name);
+      }
+    }
+
+    const indexDefinitions = [
+      {
+        name: 'show_archive_archived_at_idx',
+        ddl: `CREATE INDEX IF NOT EXISTS ${this._indexName('show_archive_archived_at_idx')} ON ${archiveTable} (archived_at DESC)`
+      },
+      {
+        name: 'staff_role_name_idx',
+        ddl: `CREATE INDEX IF NOT EXISTS ${this._indexName('staff_role_name_idx')} ON ${staffTable} (role, name)`
+      }
+    ];
+
+    for(const definition of indexDefinitions){
+      const exists = await this._selectOne(
+        `SELECT 1 FROM pg_indexes WHERE schemaname = $1 AND indexname = $2`,
+        [schemaName, this._indexKey(definition.name)]
+      );
+      if(!exists){
+        await this._run(definition.ddl);
+        summary.indexesCreated.push(definition.name);
+      }
+    }
+
+    return summary;
   }
 
   async _seedDefaultStaff(){
@@ -837,9 +900,10 @@ class PostgresProvider {
   }
 
   async _ensureDatabaseExists(poolConfig){
+    const result = {databaseCreated: false};
     const databaseName = this._getDatabaseNameFromConfig(poolConfig);
     if(!databaseName){
-      return;
+      return result;
     }
     let probePool = null;
     try{
@@ -849,7 +913,7 @@ class PostgresProvider {
       if(err?.code !== '3D000'){
         throw err;
       }
-      await this._createDatabaseIfMissing(poolConfig, databaseName);
+      result.databaseCreated = await this._createDatabaseIfMissing(poolConfig, databaseName);
     }finally{
       if(probePool){
         try{
@@ -859,6 +923,7 @@ class PostgresProvider {
         }
       }
     }
+    return result;
   }
 
   async _createDatabaseIfMissing(poolConfig, databaseName){
@@ -867,9 +932,10 @@ class PostgresProvider {
     try{
       adminPool = this._createPool(adminConfig);
       await adminPool.query(`CREATE DATABASE ${this._quoteIdentifier(databaseName)}`);
+      return true;
     }catch(err){
       if(err?.code === '42P04'){
-        return;
+        return false;
       }
       throw err;
     }finally{
@@ -881,6 +947,7 @@ class PostgresProvider {
         }
       }
     }
+    return false;
   }
 
   _buildAdminPoolConfig(poolConfig){
@@ -962,12 +1029,69 @@ class PostgresProvider {
     return this._formatIdentifier(name);
   }
 
-  _indexName(name){
-    const base = `${this.schema || 'public'}_${name}`;
+  _indexKey(name){
+    if(!IDENTIFIER_REGEX.test(name)){
+      throw new Error(`Invalid index key: ${name}`);
+    }
+    const schemaPrefix = (this.schema || 'public').toLowerCase();
+    const base = `${schemaPrefix}_${name.toLowerCase()}`;
     if(!IDENTIFIER_REGEX.test(base)){
       throw new Error(`Invalid index name: ${base}`);
     }
-    return this._formatIdentifier(base.toLowerCase());
+    return base;
+  }
+
+  _indexName(name){
+    return this._formatIdentifier(this._indexKey(name));
+  }
+
+  _logConnectionEstablished(){
+    try{
+      const meta = this.getStorageMetadata();
+      const host = meta.host || 'localhost';
+      const port = meta.port || 5432;
+      const database = meta.database || '(unknown)';
+      const schema = meta.schema || (this.schema || 'public');
+      console.info(`[storage] PostgreSQL connection pool ready for ${database}@${host}:${port} (schema ${schema})`);
+    }catch(err){
+      console.info('[storage] PostgreSQL connection pool ready');
+    }
+  }
+
+  _logBootstrapSummary({databaseCreated = false, schemaCreated = false, tablesCreated = [], indexesCreated = [], seededDefaults = false} = {}){
+    const actions = [];
+    let meta = null;
+    try{
+      meta = this.getStorageMetadata();
+    }catch(err){
+      meta = null;
+    }
+    const databaseLabel = meta?.database || '(unknown)';
+    const schemaLabel = meta?.schema || (this.schema || 'public');
+    if(databaseCreated){
+      actions.push(`database "${databaseLabel}"`);
+    }
+    if(schemaCreated){
+      actions.push(`schema "${schemaLabel}"`);
+    }
+    if(tablesCreated.length){
+      actions.push(`tables [${tablesCreated.join(', ')}]`);
+    }
+    if(indexesCreated.length){
+      actions.push(`indexes [${indexesCreated.join(', ')}]`);
+    }
+    if(actions.length){
+      const context = meta ? {
+        database: meta.database,
+        schema: meta.schema,
+        host: meta.host,
+        port: meta.port
+      } : {};
+      console.info(`[storage] PostgreSQL bootstrap automation created ${actions.join(', ')}`, context);
+    }
+    if(seededDefaults){
+      console.info('[storage] PostgreSQL default staff roster seeded');
+    }
   }
 }
 
