@@ -21,7 +21,8 @@ class PostgresProvider {
       await this.dispose();
     }
     const poolConfig = this._buildPoolConfig();
-    this.pool = new Pool(poolConfig);
+    await this._ensureDatabaseExists(poolConfig);
+    this.pool = this._createPool(poolConfig);
     // sanity check connection
     await this.pool.query('SELECT 1');
 
@@ -761,6 +762,10 @@ class PostgresProvider {
     }
   }
 
+  _createPool(config){
+    return new Pool(config);
+  }
+
   _buildPoolConfig(){
     const cfg = this.config || {};
     const poolConfig = {...(cfg.pool || {})};
@@ -831,6 +836,94 @@ class PostgresProvider {
     return poolConfig;
   }
 
+  async _ensureDatabaseExists(poolConfig){
+    const databaseName = this._getDatabaseNameFromConfig(poolConfig);
+    if(!databaseName){
+      return;
+    }
+    let probePool = null;
+    try{
+      probePool = this._createPool(poolConfig);
+      await probePool.query('SELECT 1');
+    }catch(err){
+      if(err?.code !== '3D000'){
+        throw err;
+      }
+      await this._createDatabaseIfMissing(poolConfig, databaseName);
+    }finally{
+      if(probePool){
+        try{
+          await probePool.end();
+        }catch(poolErr){
+          console.error('Failed to dispose probe pool', poolErr);
+        }
+      }
+    }
+  }
+
+  async _createDatabaseIfMissing(poolConfig, databaseName){
+    const adminConfig = this._buildAdminPoolConfig(poolConfig);
+    let adminPool = null;
+    try{
+      adminPool = this._createPool(adminConfig);
+      await adminPool.query(`CREATE DATABASE ${this._quoteIdentifier(databaseName)}`);
+    }catch(err){
+      if(err?.code === '42P04'){
+        return;
+      }
+      throw err;
+    }finally{
+      if(adminPool){
+        try{
+          await adminPool.end();
+        }catch(poolErr){
+          console.error('Failed to dispose admin pool', poolErr);
+        }
+      }
+    }
+  }
+
+  _buildAdminPoolConfig(poolConfig){
+    const adminDatabase = this.config?.adminDatabase
+      || process.env.PGADMIN_DB
+      || process.env.PGDEFAULT_DB
+      || 'postgres';
+    if(poolConfig.connectionString){
+      try{
+        const url = new URL(poolConfig.connectionString);
+        url.pathname = `/${encodeURIComponent(adminDatabase)}`;
+        const adminConfig = {...poolConfig, connectionString: url.toString()};
+        if(poolConfig.ssl !== undefined){
+          adminConfig.ssl = poolConfig.ssl;
+        }
+        return adminConfig;
+      }catch(err){
+        console.error('Failed to parse connection string for admin pool', err);
+      }
+    }
+    return {
+      ...poolConfig,
+      database: adminDatabase
+    };
+  }
+
+  _getDatabaseNameFromConfig(poolConfig){
+    if(poolConfig.database){
+      return poolConfig.database;
+    }
+    if(poolConfig.connectionString){
+      try{
+        const url = new URL(poolConfig.connectionString);
+        const pathname = url.pathname || '';
+        const dbName = decodeURIComponent(pathname.replace(/^\//, ''));
+        return dbName || null;
+      }catch(err){
+        console.error('Failed to parse connection string for database name', err);
+      }
+    }
+    return null;
+  }
+
   _sanitizeIdentifier(value){
     if(typeof value !== 'string'){
       return null;
@@ -850,6 +943,13 @@ class PostgresProvider {
       throw new Error(`Invalid identifier: ${identifier}`);
     }
     return `"${identifier}"`;
+  }
+
+  _quoteIdentifier(identifier){
+    if(typeof identifier !== 'string' || !identifier){
+      throw new Error(`Invalid identifier: ${identifier}`);
+    }
+    return `"${identifier.replace(/"/g, '""')}"`;
   }
 
   _table(name){
