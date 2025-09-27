@@ -116,7 +116,7 @@ body.view-archive .view-archive-only{display:block !important}
 .auth-grid{display:grid;gap:12px;grid-template-columns:repeat(2, minmax(0,1fr));}
 .auth-message{min-height:22px;color:var(--danger);font-size:13px;margin-top:6px;}
 .auth-submit{margin-top:6px;}
-.topbar-user{display:flex;align-items:center;gap:8px;margin-left:8px;}
+.topbar-user{display:flex;align-items:center;justify-content:flex-end;gap:8px;min-width:0;visibility:hidden;}
 .topbar-user .btn.small{white-space:nowrap;}
 .user-label{font-size:13px;color:rgba(226,232,240,.72);font-weight:600;}
 .btn.danger{
@@ -235,43 +235,46 @@ body.menu-open .app-main{transform:translateX(calc(min(var(--drawer-width), 92vw
   border-bottom:1px solid var(--border);
 }
 .topbar-toolbar{
-  display:grid;
-  grid-template-columns:auto 1fr auto;
-  grid-template-areas:"actions title logo";
+  display:flex;
   align-items:center;
+  justify-content:space-between;
   gap:16px;
   min-height:60px;
   width:100%;
+  flex-wrap:wrap;
 }
-.topbar-actions{
-  grid-area:actions;
+.topbar-left{
   display:flex;
   align-items:center;
-  gap:10px;
-  justify-self:start;
+  gap:12px;
+  flex:1 1 260px;
+  min-width:0;
+  flex-wrap:wrap;
 }
-body.view-lead .topbar-actions,
-body.view-pilot .topbar-actions{
-  justify-self:start;
+.topbar-right{
+  display:flex;
+  align-items:center;
+  justify-content:flex-end;
+  gap:20px;
+  flex:1 1 320px;
+  min-width:0;
+  flex-wrap:wrap;
 }
 .topbar-title{
-  grid-area:title;
   margin-left:0;
   display:flex;
   flex-direction:column;
   align-items:flex-end;
   gap:4px;
   text-align:right;
-  justify-self:end;
+  min-width:0;
 }
 .app-logo{
-  grid-area:logo;
   display:block;
   height:26px;
   width:auto;
   max-width:150px;
   filter:drop-shadow(0 8px 16px rgba(0,0,0,.45));
-  justify-self:end;
 }
 .title-stack{display:flex;flex-direction:column;align-items:flex-end;gap:4px;}
 .topbar-title .view-badge{align-self:flex-end;}
@@ -280,19 +283,29 @@ body.view-pilot .topbar-actions{
 @media (max-width:720px){
   .topbar{padding:10px 16px;}
   .topbar-toolbar{
-    grid-template-columns:auto 1fr;
-    grid-template-areas:
-      "actions logo"
-      "title title";
-    gap:10px;
-    min-height:0;
+    flex-direction:column;
+    align-items:stretch;
+    gap:12px;
   }
-  .topbar-actions{
+  .topbar-left,
+  .topbar-right{
     width:100%;
-    gap:8px;
+    flex:1 1 auto;
+  }
+  .topbar-left{
+    justify-content:space-between;
+    gap:10px;
+  }
+  .topbar-right{
+    flex-direction:column;
+    align-items:flex-start;
+    gap:12px;
+  }
+  .topbar-user{
+    width:100%;
+    justify-content:flex-start;
   }
   .topbar-title{
-    justify-self:stretch;
     align-items:flex-start;
     text-align:left;
     width:100%;
@@ -314,6 +327,13 @@ body.view-pilot .topbar-actions{
   position:relative;
   animation:panelIn .45s ease;
   transition:transform .25s ease, box-shadow .25s ease;
+}
+.landing-welcome{
+  margin:0 0 12px;
+  font-size:20px;
+  font-weight:700;
+  color:#e1eeff;
+  text-shadow:0 0 12px rgba(59,130,246,.3);
 }
 .landing-panel{
   background:rgba(22,24,29,.76);

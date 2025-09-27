@@ -228,7 +228,9 @@ const cancelConfigBtn = el('cancelConfig');
 const configForm = el('configForm');
 const configMessage = el('configMessage');
 const configNavButtons = qsa('[data-config-target]');
+const adminNavButton = qs('[data-config-target="admin"]');
 const configSections = qsa('[data-config-section]');
+const adminConfigSection = qs('[data-config-section="admin"]');
 const adminPinPrompt = el('adminPinPrompt');
 const adminPinInput = el('adminPinInput');
 const adminPinSubmit = el('adminPinSubmit');
@@ -247,6 +249,7 @@ const closeWebhookModalBtn = el('closeWebhookModal');
 const webhookForm = el('webhookForm');
 const webhookCancelBtn = el('webhookCancel');
 const roleHomeBtn = el('roleHome');
+const landingWelcome = el('landingWelcome');
 const viewBadge = el('viewBadge');
 const chooseLeadBtn = el('chooseLead');
 const choosePilotBtn = el('choosePilot');
@@ -416,9 +419,14 @@ function initUI(){
       btn.setAttribute('aria-pressed', btn.classList.contains('is-active') ? 'true' : 'false');
       btn.addEventListener('click', ()=>{
         const target = btn.dataset.configTarget;
-        if(target === 'admin' && !adminUnlocked){
-          openAdminPinPrompt();
-          return;
+        if(target === 'admin'){
+          if(!isAdminUser(state.currentUser)){
+            return;
+          }
+          if(!adminUnlocked){
+            openAdminPinPrompt();
+            return;
+          }
         }
         setConfigSection(target || 'lead');
       });
@@ -650,24 +658,87 @@ function resetAppState(){
 }
 
 function updateUserBadge(){
-  if(!currentUserLabel){
-    return;
+  const container = currentUserLabel ? currentUserLabel.parentElement : null;
+  if(currentUserLabel){
+    if(state.currentUser){
+      const roleLabel = formatRoleLabel(state.currentUser.role);
+      const display = state.currentUser.displayName || state.currentUser.email || '';
+      const segments = display ? [display, roleLabel] : [roleLabel];
+      currentUserLabel.textContent = segments.join(' • ');
+      if(container){
+        container.style.visibility = 'visible';
+      }
+    }else{
+      currentUserLabel.textContent = '';
+      if(container){
+        container.style.visibility = 'hidden';
+      }
+    }
+  }else if(container){
+    container.style.visibility = state.currentUser ? 'visible' : 'hidden';
   }
-  const container = currentUserLabel.parentElement;
-  if(state.currentUser){
-    const roleLabel = state.currentUser.role === 'pilot' ? 'Pilot' : 'Stagehand';
-    currentUserLabel.textContent = `${state.currentUser.displayName} • ${roleLabel}`;
-    if(logoutBtn){ logoutBtn.disabled = false; }
-    if(container){ container.style.visibility = 'visible'; }
-  }else{
-    currentUserLabel.textContent = '';
-    if(logoutBtn){ logoutBtn.disabled = true; }
-    if(container){ container.style.visibility = 'hidden'; }
+  if(logoutBtn){
+    logoutBtn.disabled = !state.isAuthenticated;
   }
   if(configBtn){
     configBtn.disabled = !state.isAuthenticated;
     configBtn.setAttribute('aria-disabled', state.isAuthenticated ? 'false' : 'true');
   }
+  updateAdminVisibility();
+  updateLandingWelcome();
+}
+
+function updateAdminVisibility(){
+  const isAdmin = isAdminUser(state.currentUser);
+  if(!isAdmin && currentConfigSection === 'admin'){
+    setConfigSection('lead');
+  }
+  if(adminNavButton){
+    adminNavButton.hidden = !isAdmin;
+    adminNavButton.setAttribute('aria-hidden', isAdmin ? 'false' : 'true');
+    if(!isAdmin){
+      adminNavButton.setAttribute('tabindex', '-1');
+    }else{
+      adminNavButton.removeAttribute('tabindex');
+    }
+  }
+  if(adminConfigSection){
+    if(isAdmin){
+      adminConfigSection.hidden = false;
+      const isActive = adminConfigSection.classList.contains('is-active');
+      adminConfigSection.setAttribute('aria-hidden', isActive ? 'false' : 'true');
+    }else{
+      adminConfigSection.hidden = true;
+      adminConfigSection.classList.remove('is-active');
+      adminConfigSection.setAttribute('aria-hidden', 'true');
+    }
+  }
+  if(!isAdmin){
+    adminUnlocked = false;
+    closeAdminPinPrompt();
+  }
+}
+
+function updateLandingWelcome(){
+  if(!landingWelcome){
+    return;
+  }
+  const isLanding = state.currentView === 'landing';
+  if(!state.currentUser || !isLanding){
+    landingWelcome.hidden = true;
+    landingWelcome.setAttribute('aria-hidden', 'true');
+    landingWelcome.textContent = '';
+    return;
+  }
+  let firstName = (state.currentUser.firstName || '').trim();
+  if(!firstName){
+    const display = (state.currentUser.displayName || state.currentUser.email || '').trim();
+    firstName = display.split(/\s+/)[0] || '';
+  }
+  const message = firstName ? `Welcome, ${firstName}!` : 'Welcome!';
+  landingWelcome.textContent = message;
+  landingWelcome.hidden = false;
+  landingWelcome.setAttribute('aria-hidden', 'false');
 }
 
 function showAuthOverlay(mode = 'login'){
@@ -825,6 +896,24 @@ function normalizeUser(raw = {}){
     updatedAt: raw.updatedAt ?? null,
     lastLogin: raw.lastLogin ?? null
   };
+}
+
+function formatRoleLabel(role){
+  const value = typeof role === 'string' ? role.trim().toLowerCase() : '';
+  if(value === 'pilot'){
+    return 'Pilot';
+  }
+  if(value === 'admin'){
+    return 'Admin';
+  }
+  return 'Stagehand';
+}
+
+function isAdminUser(user){
+  if(!user || typeof user.role !== 'string'){
+    return false;
+  }
+  return user.role.toLowerCase() === 'admin';
 }
 
 function computeSphereEmail(firstName, lastName){
@@ -3852,6 +3941,7 @@ function setView(view){
   if(view === 'archive'){
     renderArchiveSelect();
   }
+  updateLandingWelcome();
 }
 
 function toggleConfig(open){
@@ -3896,6 +3986,9 @@ function setConfigSection(section){
 }
 
 function openAdminPinPrompt(){
+  if(!isAdminUser(state.currentUser)){
+    return;
+  }
   if(adminUnlocked){
     setConfigSection('admin');
     return;
@@ -3935,6 +4028,10 @@ function closeAdminPinPrompt(){
 }
 
 function submitAdminPin(){
+  if(!isAdminUser(state.currentUser)){
+    closeAdminPinPrompt();
+    return;
+  }
   if(!adminPinInput){
     return;
   }
@@ -4580,7 +4677,7 @@ function renderUserList(){
     meta.className = 'user-meta';
     const role = document.createElement('span');
     role.className = 'user-role-badge';
-    role.textContent = user.role === 'pilot' ? 'Pilot' : 'Stagehand';
+    role.textContent = formatRoleLabel(user.role);
     const email = document.createElement('span');
     email.textContent = user.email;
     meta.appendChild(role);
