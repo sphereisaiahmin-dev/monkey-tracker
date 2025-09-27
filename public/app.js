@@ -152,6 +152,13 @@ const state = {
     crew: [],
     pilots: [],
     monkeyLeads: []
+  },
+  authToken: null,
+  currentUser: null,
+  isAuthenticated: false,
+  users: [],
+  userForm: {
+    editingId: null
   }
 };
 
@@ -167,6 +174,20 @@ let archiveChartInstance = null;
 
 const SYNC_CHANNEL_NAME = 'monkey-tracker-sync';
 
+const authOverlay = el('authOverlay');
+const loginForm = el('loginForm');
+const loginEmailInput = el('loginEmail');
+const loginPasswordInput = el('loginPassword');
+const authTabLogin = el('authTabLogin');
+const authTabRegister = el('authTabRegister');
+const registerForm = el('registerForm');
+const regFirstNameInput = el('regFirstName');
+const regLastNameInput = el('regLastName');
+const regEmailInput = el('regEmail');
+const regRoleSelect = el('regRole');
+const regPasswordInput = el('regPassword');
+const regPasswordConfirmInput = el('regPasswordConfirm');
+const authMessage = el('authMessage');
 const appTitle = el('appTitle');
 const unitLabelEl = el('unitLabel');
 const showDate = el('showDate');
@@ -266,6 +287,21 @@ const lanAddressEl = el('lanAddress');
 const pilotListInput = el('pilotList');
 const crewListInput = el('crewList');
 const monkeyLeadListInput = el('monkeyLeadList');
+const currentUserLabel = el('currentUserLabel');
+const logoutBtn = el('logoutBtn');
+const userListEl = el('userList');
+const userFormWrap = el('userFormWrap');
+const userFirstNameInput = el('userFirstName');
+const userLastNameInput = el('userLastName');
+const userEmailInput = el('userEmail');
+const userRoleSelect = el('userRole');
+const userPasswordInput = el('userPassword');
+const userPasswordConfirmInput = el('userPasswordConfirm');
+const userFormSubmit = el('userFormSubmit');
+const userFormCancel = el('userFormCancel');
+const userFormDelete = el('userFormDelete');
+const userFormMessage = el('userFormMessage');
+const userFormTitle = el('userFormTitle');
 
 const ADMIN_PIN = '4206';
 let adminUnlocked = false;
@@ -282,17 +318,10 @@ init().catch(err=>{
 });
 
 async function init(){
-  await loadConfig();
-  updateConnectionIndicator('loading');
-  await loadStaff();
-  await loadShows();
   initUI();
-  setupSyncChannel();
-  populateUnitOptions();
-  populateIssues();
-  renderActionsChips(actionsChips, []);
-  setCurrentShow(state.currentShowId || null);
-  setView('landing');
+  initAuthUI();
+  loadStoredAuthToken();
+  await resumeSession();
 }
 
 function initUI(){
@@ -374,7 +403,12 @@ function initUI(){
   el('closeEdit').addEventListener('click', closeEditModal);
   el('saveEdit').addEventListener('click', saveEditEntry);
 
-  configBtn.addEventListener('click', ()=> toggleConfig(true));
+  configBtn.addEventListener('click', ()=>{
+    if(configBtn.disabled){
+      return;
+    }
+    toggleConfig(true);
+  });
   closeConfigBtn.addEventListener('click', ()=> toggleConfig(false));
   cancelConfigBtn.addEventListener('click', ()=> toggleConfig(false));
   if(configNavButtons.length){
@@ -484,6 +518,333 @@ function initUI(){
   renderShowHeaderDraft();
 }
 
+function initAuthUI(){
+  if(authTabLogin){
+    authTabLogin.addEventListener('click', ()=> switchAuthMode('login'));
+  }
+  if(authTabRegister){
+    authTabRegister.addEventListener('click', ()=> switchAuthMode('register'));
+  }
+  if(loginForm){
+    loginForm.addEventListener('submit', handleLoginSubmit);
+  }
+  if(registerForm){
+    registerForm.addEventListener('submit', handleRegisterSubmit);
+  }
+  if(regFirstNameInput){
+    regFirstNameInput.addEventListener('input', updateRegisterEmail);
+  }
+  if(regLastNameInput){
+    regLastNameInput.addEventListener('input', updateRegisterEmail);
+  }
+  if(userFirstNameInput){
+    userFirstNameInput.addEventListener('input', updateUserEmailPreview);
+  }
+  if(userLastNameInput){
+    userLastNameInput.addEventListener('input', updateUserEmailPreview);
+  }
+  if(logoutBtn){
+    logoutBtn.addEventListener('click', handleLogout);
+  }
+  if(userFormWrap){
+    userFormWrap.addEventListener('submit', handleUserFormSubmit);
+  }
+  if(userFormCancel){
+    userFormCancel.addEventListener('click', cancelUserEdit);
+  }
+  if(userFormDelete){
+    userFormDelete.addEventListener('click', handleUserDelete);
+  }
+  updateRegisterEmail();
+  resetUserForm('');
+  updateUserBadge();
+}
+
+function loadStoredAuthToken(){
+  try{
+    const stored = localStorage.getItem('mt.authToken');
+    if(stored){
+      state.authToken = stored;
+    }
+  }catch(err){
+    console.warn('Failed to read stored auth token', err);
+  }
+}
+
+async function resumeSession(){
+  if(state.authToken){
+    try{
+      const user = await apiRequest('/api/me');
+      state.currentUser = normalizeUser(user);
+      await onAuthenticated({silent: true});
+      return;
+    }catch(err){
+      console.warn('Existing session invalid', err);
+      clearAuthToken({silent: true});
+    }
+  }
+  showAuthOverlay('login');
+}
+
+async function onAuthenticated(options = {}){
+  state.isAuthenticated = true;
+  hideAuthOverlay();
+  updateUserBadge();
+  if(pilotListInput){ pilotListInput.disabled = true; }
+  if(monkeyLeadListInput){ monkeyLeadListInput.disabled = true; }
+  if(crewListInput){ crewListInput.disabled = true; }
+  try{
+    updateConnectionIndicator('loading');
+    await loadConfig();
+    await Promise.all([loadStaff(), loadUsers()]);
+    resetUserForm('');
+    await loadShows();
+    populateUnitOptions();
+    populateIssues();
+    renderActionsChips(actionsChips, []);
+    if(!syncState.channel){
+      setupSyncChannel();
+    }
+    setCurrentShow(state.currentShowId || null);
+    setView(options.initialView || 'landing');
+  }catch(err){
+    console.error('Failed to load authenticated data', err);
+    toast(err.message || 'Failed to load data', true);
+  }
+}
+
+function setAuthToken(token){
+  state.authToken = token || null;
+  try{
+    if(state.authToken){
+      localStorage.setItem('mt.authToken', state.authToken);
+    }else{
+      localStorage.removeItem('mt.authToken');
+    }
+  }catch(err){
+    console.warn('Failed to persist auth token', err);
+  }
+}
+
+function clearAuthToken(options = {}){
+  setAuthToken(null);
+  state.currentUser = null;
+  state.isAuthenticated = false;
+  if(!options.silent){
+    showAuthOverlay('login');
+  }
+  updateUserBadge();
+  resetAppState();
+}
+
+function resetAppState(){
+  state.shows = [];
+  state.currentShowId = null;
+  state.staff = {crew: [], pilots: [], monkeyLeads: []};
+  state.users = [];
+  renderCrewOptions([]);
+  renderPilotAssignments(null);
+  renderOperatorOptions();
+  renderShowHeaderDraft();
+  renderUserList();
+}
+
+function updateUserBadge(){
+  if(!currentUserLabel){
+    return;
+  }
+  const container = currentUserLabel.parentElement;
+  if(state.currentUser){
+    const roleLabel = state.currentUser.role === 'pilot' ? 'Pilot' : 'Stagehand';
+    currentUserLabel.textContent = `${state.currentUser.displayName} • ${roleLabel}`;
+    if(logoutBtn){ logoutBtn.disabled = false; }
+    if(container){ container.style.visibility = 'visible'; }
+  }else{
+    currentUserLabel.textContent = '';
+    if(logoutBtn){ logoutBtn.disabled = true; }
+    if(container){ container.style.visibility = 'hidden'; }
+  }
+  if(configBtn){
+    configBtn.disabled = !state.isAuthenticated;
+    configBtn.setAttribute('aria-disabled', state.isAuthenticated ? 'false' : 'true');
+  }
+}
+
+function showAuthOverlay(mode = 'login'){
+  if(!authOverlay){
+    return;
+  }
+  authOverlay.hidden = false;
+  switchAuthMode(mode);
+  if(mode === 'login' && loginEmailInput){
+    requestAnimationFrame(()=> loginEmailInput.focus());
+  }else if(mode === 'register' && regFirstNameInput){
+    requestAnimationFrame(()=> regFirstNameInput.focus());
+  }
+}
+
+function hideAuthOverlay(){
+  if(authOverlay){
+    authOverlay.hidden = true;
+  }
+  setAuthMessage('');
+}
+
+function switchAuthMode(mode){
+  if(!authOverlay){
+    return;
+  }
+  const showLogin = mode !== 'register';
+  if(loginForm){
+    loginForm.classList.toggle('is-active', showLogin);
+  }
+  if(registerForm){
+    registerForm.classList.toggle('is-active', !showLogin);
+    registerForm.setAttribute('aria-hidden', showLogin ? 'true' : 'false');
+  }
+  if(authTabLogin){
+    authTabLogin.classList.toggle('is-active', showLogin);
+    authTabLogin.setAttribute('aria-selected', showLogin ? 'true' : 'false');
+  }
+  if(authTabRegister){
+    authTabRegister.classList.toggle('is-active', !showLogin);
+    authTabRegister.setAttribute('aria-selected', showLogin ? 'false' : 'true');
+  }
+  setAuthMessage('');
+}
+
+function updateRegisterEmail(){
+  if(!regEmailInput){
+    return;
+  }
+  const email = computeSphereEmail(regFirstNameInput?.value, regLastNameInput?.value);
+  regEmailInput.value = email;
+}
+
+function updateUserEmailPreview(){
+  if(state.userForm.editingId){
+    return;
+  }
+  if(!userEmailInput){
+    return;
+  }
+  userEmailInput.value = computeSphereEmail(userFirstNameInput?.value, userLastNameInput?.value);
+}
+
+async function handleLoginSubmit(event){
+  event.preventDefault();
+  const email = loginEmailInput?.value?.trim();
+  const password = loginPasswordInput?.value || '';
+  if(!email || !password){
+    setAuthMessage('Email and password are required.');
+    return;
+  }
+  try{
+    const data = await apiRequest('/api/auth/login', {
+      method: 'POST',
+      body: {email, password}
+    });
+    onAuthSuccess(data);
+  }catch(err){
+    console.error('Login failed', err);
+    setAuthMessage(err.message || 'Login failed');
+  }
+}
+
+async function handleRegisterSubmit(event){
+  event.preventDefault();
+  const firstName = regFirstNameInput?.value?.trim();
+  const lastName = regLastNameInput?.value?.trim();
+  const email = regEmailInput?.value?.trim();
+  const role = regRoleSelect?.value || 'pilot';
+  const password = regPasswordInput?.value || '';
+  const confirm = regPasswordConfirmInput?.value || '';
+  if(!firstName || !lastName){
+    setAuthMessage('First and last name are required.');
+    return;
+  }
+  if(password.length < 4){
+    setAuthMessage('Choose a password with at least 4 characters.');
+    return;
+  }
+  if(password !== confirm){
+    setAuthMessage('Passwords do not match.');
+    return;
+  }
+  try{
+    const data = await apiRequest('/api/auth/register', {
+      method: 'POST',
+      body: {firstName, lastName, email, role, password}
+    });
+    onAuthSuccess(data);
+  }catch(err){
+    console.error('Registration failed', err);
+    setAuthMessage(err.message || 'Registration failed');
+  }
+}
+
+async function handleLogout(){
+  try{
+    await apiRequest('/api/auth/logout', {method: 'POST'});
+  }catch(err){
+    console.warn('Failed to notify server of logout', err);
+  }
+  clearAuthToken();
+}
+
+function onAuthSuccess(payload){
+  if(!payload || !payload.token || !payload.user){
+    setAuthMessage('Unexpected authentication response.');
+    return;
+  }
+  setAuthToken(payload.token);
+  state.currentUser = normalizeUser(payload.user);
+  updateUserBadge();
+  onAuthenticated();
+}
+
+function setAuthMessage(message){
+  if(!authMessage){
+    return;
+  }
+  authMessage.textContent = message || '';
+}
+
+function normalizeUser(raw = {}){
+  if(!raw){
+    return null;
+  }
+  return {
+    id: raw.id || raw.user?.id || null,
+    email: raw.email || raw.user?.email || '',
+    firstName: raw.firstName || raw.user?.firstName || '',
+    lastName: raw.lastName || raw.user?.lastName || '',
+    displayName: raw.displayName || raw.user?.displayName || [raw.firstName, raw.lastName].filter(Boolean).join(' ') || raw.email || '',
+    role: (raw.role || raw.user?.role || 'stagehand').toLowerCase(),
+    createdAt: raw.createdAt ?? null,
+    updatedAt: raw.updatedAt ?? null,
+    lastLogin: raw.lastLogin ?? null
+  };
+}
+
+function computeSphereEmail(firstName, lastName){
+  const first = typeof firstName === 'string' ? firstName.trim() : '';
+  const last = typeof lastName === 'string' ? lastName.trim() : '';
+  if(!first && !last){
+    return '';
+  }
+  const sanitize = value => value
+    .toLowerCase()
+    .replace(/[^a-z\s-]/g, '')
+    .trim()
+    .replace(/[\s]+/g, '.')
+    .replace(/\.+/g, '.');
+  const firstPart = sanitize(first);
+  const lastPart = sanitize(last);
+  const segments = [firstPart, lastPart].filter(Boolean);
+  return segments.length ? `${segments.join('.')}@thesphere.com` : '';
+}
+
 async function loadConfig(){
   const data = await apiRequest('/api/config');
   state.config = data;
@@ -534,11 +895,34 @@ async function loadStaff(){
       state.staff.pilots = [];
       state.staff.monkeyLeads = [];
     }
-    toast('Failed to load staff directory', true);
+    if(state.isAuthenticated){
+      toast('Failed to load staff directory', true);
+    }
   }
   populateStaffSettings();
   renderOperatorOptions();
   renderShowHeaderDraft();
+}
+
+async function loadUsers(){
+  try{
+    const data = await apiRequest('/api/users');
+    const users = Array.isArray(data?.users)
+      ? data.users.map(user => normalizeUser(user)).filter(Boolean).sort((a, b)=>{
+        const nameA = (a.displayName || a.email || '').toLowerCase();
+        const nameB = (b.displayName || b.email || '').toLowerCase();
+        return nameA.localeCompare(nameB);
+      })
+      : [];
+    state.users = users;
+  }catch(err){
+    console.error('Failed to load users', err);
+    if(state.isAuthenticated){
+      toast('Failed to load user directory', true);
+    }
+    state.users = [];
+  }
+  renderUserList();
 }
 
 async function loadShows(){
@@ -565,7 +949,9 @@ async function loadShows(){
     console.error('Failed to load shows', err);
     state.shows = [];
     state.currentShowId = null;
-    toast('Failed to load shows', true);
+    if(state.isAuthenticated){
+      toast('Failed to load shows', true);
+    }
     updateConnectionIndicator('error');
   }
 }
@@ -3568,11 +3954,6 @@ function submitAdminPin(){
 
 async function onConfigSubmit(event){
   event.preventDefault();
-  const staffPayload = {
-    pilots: parseStaffTextarea(pilotListInput ? pilotListInput.value : ''),
-    monkeyLeads: parseStaffTextarea(monkeyLeadListInput ? monkeyLeadListInput.value : ''),
-    crew: parseStaffTextarea(crewListInput ? crewListInput.value : '')
-  };
   const payload = {
     unitLabel: unitLabelSelect.value,
     webhook: {
@@ -3583,25 +3964,6 @@ async function onConfigSubmit(event){
       headers: parseHeadersText(webhookHeaders ? webhookHeaders.value : '')
     }
   };
-  try{
-    const savedStaff = await apiRequest('/api/staff', {method: 'PUT', body: JSON.stringify(staffPayload)});
-    state.staff = {
-      pilots: normalizeNameList(savedStaff?.pilots || [], {sort: true}),
-      monkeyLeads: normalizeNameList(savedStaff?.monkeyLeads || [], {sort: true}),
-      crew: normalizeNameList(savedStaff?.crew || [], {sort: true})
-    };
-    populateStaffSettings();
-    renderCrewOptions(getCurrentShow()?.crew || []);
-    renderPilotAssignments(getCurrentShow());
-    ensureShowHeaderValid();
-    renderOperatorOptions();
-    notifyStaffChanged();
-  }catch(err){
-    console.error(err);
-    configMessage.textContent = err.message || 'Failed to save staff';
-    toast(err.message || 'Failed to save staff', true);
-    return;
-  }
   try{
     const updated = await apiRequest('/api/config', {method:'PUT', body: JSON.stringify(payload)});
     state.config = updated;
@@ -4140,11 +4502,18 @@ function toNumber(value){
 }
 
 async function apiRequest(url, options){
-  const opts = options || {};
+  const opts = options ? {...options} : {};
+  const headers = {...(opts.headers || {})};
   if(opts.body && typeof opts.body !== 'string'){
     opts.body = JSON.stringify(opts.body);
+    if(!headers['Content-Type']){
+      headers['Content-Type'] = 'application/json';
+    }
   }
-  opts.headers = Object.assign({'Content-Type': 'application/json'}, opts.headers || {});
+  if(state.authToken){
+    headers.Authorization = `Bearer ${state.authToken}`;
+  }
+  opts.headers = headers;
   const res = await fetch(url, opts);
   if(res.status === 204){
     return null;
@@ -4154,6 +4523,13 @@ async function apiRequest(url, options){
     data = await res.json();
   }catch(err){
     data = null;
+  }
+  if(res.status === 401){
+    if(state.isAuthenticated){
+      clearAuthToken();
+    }
+    const message = data && data.error ? data.error : 'Authentication required';
+    throw new Error(message);
   }
   if(!res.ok){
     const message = data && data.error ? data.error : `Request failed (${res.status})`;
@@ -4165,12 +4541,195 @@ async function apiRequest(url, options){
 function populateStaffSettings(){
   if(pilotListInput){
     pilotListInput.value = (state.staff?.pilots || []).join('\n');
+    pilotListInput.readOnly = true;
+    pilotListInput.placeholder = 'Managed via User settings';
   }
   if(monkeyLeadListInput){
     monkeyLeadListInput.value = (state.staff?.monkeyLeads || []).join('\n');
+    monkeyLeadListInput.readOnly = true;
+    monkeyLeadListInput.placeholder = 'Managed via User settings';
   }
   if(crewListInput){
     crewListInput.value = (state.staff?.crew || []).join('\n');
+    crewListInput.readOnly = true;
+    crewListInput.placeholder = 'Managed via User settings';
+  }
+}
+
+function renderUserList(){
+  if(!userListEl){
+    return;
+  }
+  const users = Array.isArray(state.users) ? state.users : [];
+  if(!users.length){
+    userListEl.innerHTML = '<p class="help">No user accounts yet. Create one below.</p>';
+    return;
+  }
+  userListEl.innerHTML = '';
+  users.forEach(user =>{
+    if(!user){
+      return;
+    }
+    const item = document.createElement('div');
+    item.className = 'user-list-item';
+    item.setAttribute('role', 'listitem');
+    const name = document.createElement('div');
+    name.className = 'user-name';
+    name.textContent = user.displayName || user.email;
+    const meta = document.createElement('div');
+    meta.className = 'user-meta';
+    const role = document.createElement('span');
+    role.className = 'user-role-badge';
+    role.textContent = user.role === 'pilot' ? 'Pilot' : 'Stagehand';
+    const email = document.createElement('span');
+    email.textContent = user.email;
+    meta.appendChild(role);
+    meta.appendChild(email);
+    const editBtn = document.createElement('button');
+    editBtn.type = 'button';
+    editBtn.className = 'btn small ghost';
+    editBtn.textContent = 'Edit';
+    editBtn.addEventListener('click', ()=> startEditUser(user.id));
+    item.appendChild(name);
+    item.appendChild(meta);
+    item.appendChild(editBtn);
+    userListEl.appendChild(item);
+  });
+}
+
+function startEditUser(userId){
+  const user = (state.users || []).find(candidate => candidate?.id === userId);
+  if(!user){
+    return;
+  }
+  state.userForm.editingId = user.id;
+  if(userFormTitle){
+    userFormTitle.textContent = 'Edit user';
+  }
+  if(userFirstNameInput){ userFirstNameInput.value = user.firstName || ''; }
+  if(userLastNameInput){ userLastNameInput.value = user.lastName || ''; }
+  if(userRoleSelect){ userRoleSelect.value = user.role || 'stagehand'; }
+  if(userEmailInput){ userEmailInput.value = user.email || ''; }
+  if(userPasswordInput){ userPasswordInput.value = ''; }
+  if(userPasswordConfirmInput){ userPasswordConfirmInput.value = ''; }
+  if(userFormCancel){ userFormCancel.hidden = false; }
+  if(userFormDelete){ userFormDelete.hidden = false; }
+  if(userFormSubmit){ userFormSubmit.textContent = 'Update user'; }
+  if(userFormMessage){ userFormMessage.textContent = ''; }
+}
+
+function cancelUserEdit(){
+  resetUserForm();
+}
+
+function resetUserForm(message = ''){
+  state.userForm.editingId = null;
+  if(userFormTitle){ userFormTitle.textContent = 'Create user'; }
+  if(userFirstNameInput){ userFirstNameInput.value = ''; }
+  if(userLastNameInput){ userLastNameInput.value = ''; }
+  if(userRoleSelect){ userRoleSelect.value = 'pilot'; }
+  if(userEmailInput){ userEmailInput.value = ''; }
+  if(userPasswordInput){ userPasswordInput.value = ''; }
+  if(userPasswordConfirmInput){ userPasswordConfirmInput.value = ''; }
+  if(userFormCancel){ userFormCancel.hidden = true; }
+  if(userFormDelete){ userFormDelete.hidden = true; }
+  if(userFormSubmit){ userFormSubmit.textContent = 'Save user'; }
+  setUserFormMessage(message);
+  updateUserEmailPreview();
+}
+
+function setUserFormMessage(message){
+  if(userFormMessage){
+    userFormMessage.textContent = message || '';
+  }
+}
+
+async function handleUserFormSubmit(event){
+  event.preventDefault();
+  if(!state.isAuthenticated){
+    setUserFormMessage('Sign in to manage users.');
+    return;
+  }
+  const firstName = userFirstNameInput?.value?.trim();
+  const lastName = userLastNameInput?.value?.trim();
+  const role = userRoleSelect?.value || 'stagehand';
+  let email = userEmailInput?.value?.trim();
+  const password = userPasswordInput?.value || '';
+  const confirm = userPasswordConfirmInput?.value || '';
+  if(!firstName || !lastName){
+    setUserFormMessage('First and last name are required.');
+    return;
+  }
+  if(!state.userForm.editingId){
+    email = computeSphereEmail(firstName, lastName);
+    if(!email){
+      setUserFormMessage('Unable to generate email. Please adjust the name.');
+      return;
+    }
+    if(!password){
+      setUserFormMessage('Password is required for new users.');
+      return;
+    }
+    if(userEmailInput){
+      userEmailInput.value = email;
+    }
+  }
+  if(password || confirm){
+    if(password !== confirm){
+      setUserFormMessage('Passwords do not match.');
+      return;
+    }
+    if(password.length < 4){
+      setUserFormMessage('Password must be at least 4 characters.');
+      return;
+    }
+  }
+  try{
+    if(state.userForm.editingId){
+      const body = {firstName, lastName, role};
+      if(password){
+        body.password = password;
+      }
+      await apiRequest(`/api/users/${state.userForm.editingId}`, {method: 'PUT', body});
+      setUserFormMessage('User updated.');
+    }else{
+      await apiRequest('/api/users', {method: 'POST', body: {firstName, lastName, role, email, password}});
+      setUserFormMessage('User created.');
+    }
+    await loadUsers();
+    await loadStaff();
+    notifyStaffChanged();
+    if(!state.userForm.editingId){
+      resetUserForm('User created.');
+    }else{
+      resetUserForm('User updated.');
+    }
+  }catch(err){
+    console.error('Failed to save user', err);
+    setUserFormMessage(err.message || 'Failed to save user');
+  }
+}
+
+async function handleUserDelete(){
+  const userId = state.userForm.editingId;
+  if(!userId){
+    return;
+  }
+  const user = (state.users || []).find(candidate => candidate?.id === userId);
+  const name = user?.displayName || user?.email || 'this user';
+  const confirmed = window.confirm(`Remove ${name}? This cannot be undone.`);
+  if(!confirmed){
+    return;
+  }
+  try{
+    await apiRequest(`/api/users/${userId}`, {method: 'DELETE'});
+    await loadUsers();
+    await loadStaff();
+    notifyStaffChanged();
+    resetUserForm('User removed.');
+  }catch(err){
+    console.error('Failed to delete user', err);
+    setUserFormMessage(err.message || 'Failed to delete user');
   }
 }
 

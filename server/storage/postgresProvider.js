@@ -1,11 +1,21 @@
 const { Pool } = require('pg');
 const { v4: uuidv4 } = require('uuid');
+const crypto = require('crypto');
 
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
 const ARCHIVE_RETENTION_MONTHS = 2;
-const DEFAULT_PILOTS = ['Alex','Nick','John Henery','James','Robert','Nazar'];
-const DEFAULT_CREW = ['Alex','Nick','John Henery','James','Robert','Nazar'];
-const DEFAULT_MONKEY_LEADS = ['Cleo','Bret','Leslie','Dallas'];
+const DEFAULT_USERS = [
+  {email: 'Nazar.Vasylyk@thesphere.com', role: 'pilot', password: 'admin'},
+  {email: 'Alexander.Brodnik@thesphere.com', role: 'pilot', password: 'admin'},
+  {email: 'Robert.Ontell@thesphere.com', role: 'pilot', password: 'admin'},
+  {email: 'Cleo.Kelley@thesphere.com', role: 'stagehand', password: 'admin'},
+  {email: 'Bret.Tuttle@thesphere.com', role: 'stagehand', password: 'admin'}
+];
+
+const PASSWORD_ITERATIONS = 120_000;
+const PASSWORD_KEY_LENGTH = 64;
+const PASSWORD_DIGEST = 'sha512';
+const DEFAULT_TOKEN_TTL_MS = 7 * DAY_IN_MS;
 
 const IDENTIFIER_REGEX = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
@@ -28,7 +38,7 @@ class PostgresProvider {
     this._logConnectionEstablished();
 
     const schemaSummary = await this._ensureSchema();
-    const seededDefaults = await this._seedDefaultStaff();
+    const seededDefaults = await this._seedDefaultUsers();
     await this._refreshArchive();
     this._logBootstrapSummary({databaseCreated, ...schemaSummary, seededDefaults});
   }
@@ -262,23 +272,165 @@ class PostgresProvider {
   }
 
   async getStaff(){
+    const pilotUsers = await this._listUsersByRole('pilot');
+    const stagehands = await this._listUsersByRole('stagehand');
+    if(pilotUsers.length === 0 && stagehands.length === 0){
+      return {
+        crew: await this._listStaffByRole('crew'),
+        pilots: await this._listStaffByRole('pilot'),
+        monkeyLeads: await this._listMonkeyLeads()
+      };
+    }
     return {
-      crew: await this._listStaffByRole('crew'),
-      pilots: await this._listStaffByRole('pilot'),
-      monkeyLeads: await this._listMonkeyLeads()
+      crew: stagehands.map(user => user.displayName),
+      pilots: pilotUsers.map(user => user.displayName),
+      monkeyLeads: stagehands.map(user => user.displayName)
     };
   }
 
   async replaceStaff(staff = {}){
-    const crew = this._normalizeNameList(staff.crew || [], {sort: true});
-    const pilots = this._normalizeNameList(staff.pilots || [], {sort: true});
-    const monkeyLeads = this._normalizeNameList(staff.monkeyLeads || [], {sort: true});
-    await this._withClient(async client =>{
-      await this._replaceStaffRole('crew', crew, client);
-      await this._replaceStaffRole('pilot', pilots, client);
-      await this._replaceMonkeyLeads(monkeyLeads, client);
+    void staff;
+    return this.getStaff();
+  }
+
+  async listUsers(){
+    const usersTable = this._table('users');
+    const rows = await this._select(
+      `SELECT id, email, first_name, last_name, display_name, role, created_at, updated_at, last_login FROM ${usersTable} ORDER BY lower(display_name), lower(email)`
+    );
+    return rows.map(row => this._mapUserRow(row));
+  }
+
+  async createUser(input = {}){
+    const normalized = this._prepareUserProfile(input);
+    if(typeof input.password !== 'string' || !input.password){
+      const err = new Error('Password is required');
+      err.status = 400;
+      throw err;
+    }
+    const usersTable = this._table('users');
+    const existing = await this._getUserRowByEmail(normalized.email);
+    if(existing){
+      const err = new Error('Email already registered');
+      err.status = 409;
+      throw err;
+    }
+    const now = new Date();
+    const id = uuidv4();
+    const hash = this._hashPassword(input.password);
+    await this._run(
+      `INSERT INTO ${usersTable} (id, email, first_name, last_name, display_name, role, password_hash, created_at, updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$8)`,
+      [id, normalized.email, normalized.firstName, normalized.lastName, normalized.displayName, normalized.role, hash, now]
+    );
+    const row = await this._getUserRowById(id);
+    return this._mapUserRow(row);
+  }
+
+  async updateUser(id, updates = {}){
+    if(!id){
+      throw new Error('User id is required');
+    }
+    const existing = await this._getUserRowById(id);
+    if(!existing){
+      return null;
+    }
+    const profile = this._prepareUserProfile({
+      email: existing.email,
+      firstName: updates.firstName !== undefined ? updates.firstName : existing.first_name,
+      lastName: updates.lastName !== undefined ? updates.lastName : existing.last_name,
+      role: updates.role !== undefined ? updates.role : existing.role
     });
-    return {crew, pilots, monkeyLeads};
+    const usersTable = this._table('users');
+    const now = new Date();
+    const values = [profile.firstName, profile.lastName, profile.displayName, profile.role, now, id];
+    await this._run(
+      `UPDATE ${usersTable} SET first_name = $1, last_name = $2, display_name = $3, role = $4, updated_at = $5 WHERE id = $6`,
+      values
+    );
+    if(typeof updates.password === 'string' && updates.password){
+      const hash = this._hashPassword(updates.password);
+      await this._run(
+        `UPDATE ${usersTable} SET password_hash = $1, updated_at = $2 WHERE id = $3`,
+        [hash, now, id]
+      );
+      await this._revokeTokensForUser(id);
+    }
+    const row = await this._getUserRowById(id);
+    return this._mapUserRow(row);
+  }
+
+  async deleteUser(id){
+    if(!id){
+      return false;
+    }
+    const usersTable = this._table('users');
+    const result = await this.pool.query(`DELETE FROM ${usersTable} WHERE id = $1`, [id]);
+    return result.rowCount > 0;
+  }
+
+  async authenticateUser(email, password){
+    const normalizedEmail = this._normalizeEmail(email);
+    if(!normalizedEmail || typeof password !== 'string' || !password){
+      return null;
+    }
+    const row = await this._getUserRowByEmail(normalizedEmail);
+    if(!row){
+      return null;
+    }
+    if(!this._verifyPassword(password, row.password_hash)){
+      return null;
+    }
+    const now = new Date();
+    await this._run(`UPDATE ${this._table('users')} SET last_login = $1 WHERE id = $2`, [now, row.id]);
+    return this._mapUserRow({...row, last_login: now});
+  }
+
+  async createAuthToken(userId, options = {}){
+    if(!userId){
+      throw new Error('User id is required');
+    }
+    const userTokensTable = this._table('user_tokens');
+    const id = uuidv4();
+    const token = this._generateTokenValue();
+    const now = new Date();
+    const ttlMs = Number.isFinite(options.ttlMs) ? options.ttlMs : DEFAULT_TOKEN_TTL_MS;
+    const expiresAt = ttlMs ? new Date(now.getTime() + ttlMs) : null;
+    await this._run(
+      `INSERT INTO ${userTokensTable} (id, user_id, token, created_at, expires_at) VALUES ($1,$2,$3,$4,$5)`,
+      [id, userId, token, now, expiresAt]
+    );
+    return {token, expiresAt: expiresAt ? expiresAt.getTime() : null};
+  }
+
+  async getUserByToken(token){
+    if(!token){
+      return null;
+    }
+    const userTokensTable = this._table('user_tokens');
+    const usersTable = this._table('users');
+    const row = await this._selectOne(
+      `SELECT u.id, u.email, u.first_name, u.last_name, u.display_name, u.role, u.created_at, u.updated_at, u.last_login, t.expires_at FROM ${userTokensTable} t JOIN ${usersTable} u ON u.id = t.user_id WHERE t.token = $1`,
+      [token]
+    );
+    if(!row){
+      return null;
+    }
+    const expiresAt = this._getTimestamp(row.expires_at);
+    if(Number.isFinite(expiresAt) && Date.now() > expiresAt){
+      await this._run(`DELETE FROM ${userTokensTable} WHERE token = $1`, [token]);
+      return null;
+    }
+    const user = this._mapUserRow(row);
+    user.expiresAt = expiresAt ?? null;
+    return user;
+  }
+
+  async revokeToken(token){
+    if(!token){
+      return false;
+    }
+    await this._run(`DELETE FROM ${this._table('user_tokens')} WHERE token = $1`, [token]);
+    return true;
   }
 
   _assertRequiredShowFields(raw = {}){
@@ -412,6 +564,8 @@ class PostgresProvider {
     const staffTable = this._table('staff');
     const monkeyTable = this._table('monkey_leads');
     const archiveTable = this._table('show_archive');
+    const usersTable = this._table('users');
+    const userTokensTable = this._table('user_tokens');
 
     const tableDefinitions = [
       {
@@ -424,7 +578,7 @@ class PostgresProvider {
           )
         `
       },
-      {
+      { 
         name: 'staff',
         ddl: `
           CREATE TABLE IF NOT EXISTS ${staffTable} (
@@ -457,6 +611,35 @@ class PostgresProvider {
             deleted_at TIMESTAMPTZ
           )
         `
+      },
+      {
+        name: 'users',
+        ddl: `
+          CREATE TABLE IF NOT EXISTS ${usersTable} (
+            id UUID PRIMARY KEY,
+            email TEXT UNIQUE NOT NULL,
+            first_name TEXT,
+            last_name TEXT,
+            display_name TEXT NOT NULL,
+            role TEXT NOT NULL,
+            password_hash TEXT NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL,
+            updated_at TIMESTAMPTZ NOT NULL,
+            last_login TIMESTAMPTZ
+          )
+        `
+      },
+      {
+        name: 'user_tokens',
+        ddl: `
+          CREATE TABLE IF NOT EXISTS ${userTokensTable} (
+            id UUID PRIMARY KEY,
+            user_id UUID NOT NULL REFERENCES ${usersTable}(id) ON DELETE CASCADE,
+            token TEXT UNIQUE NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL,
+            expires_at TIMESTAMPTZ
+          )
+        `
       }
     ];
 
@@ -479,6 +662,18 @@ class PostgresProvider {
       {
         name: 'staff_role_name_idx',
         ddl: `CREATE INDEX IF NOT EXISTS ${this._indexName('staff_role_name_idx')} ON ${staffTable} (role, name)`
+      },
+      {
+        name: 'users_email_lower_idx',
+        ddl: `CREATE UNIQUE INDEX IF NOT EXISTS ${this._indexName('users_email_lower_idx')} ON ${usersTable} (lower(email))`
+      },
+      {
+        name: 'users_role_name_idx',
+        ddl: `CREATE INDEX IF NOT EXISTS ${this._indexName('users_role_name_idx')} ON ${usersTable} (role, lower(display_name))`
+      },
+      {
+        name: 'user_tokens_token_idx',
+        ddl: `CREATE UNIQUE INDEX IF NOT EXISTS ${this._indexName('user_tokens_token_idx')} ON ${userTokensTable} (token)`
       }
     ];
 
@@ -494,23 +689,6 @@ class PostgresProvider {
     }
 
     return summary;
-  }
-
-  async _seedDefaultStaff(){
-    let mutated = false;
-    if((await this._listStaffByRole('pilot')).length === 0){
-      await this._replaceStaffRole('pilot', this._normalizeNameList(DEFAULT_PILOTS, {sort: true}));
-      mutated = true;
-    }
-    if((await this._listStaffByRole('crew')).length === 0){
-      await this._replaceStaffRole('crew', this._normalizeNameList(DEFAULT_CREW, {sort: true}));
-      mutated = true;
-    }
-    if((await this._listMonkeyLeads()).length === 0){
-      await this._replaceMonkeyLeads(this._normalizeNameList(DEFAULT_MONKEY_LEADS, {sort: true}));
-      mutated = true;
-    }
-    return mutated;
   }
 
   async _listStaffByRole(role){
@@ -545,6 +723,16 @@ class PostgresProvider {
     for(const name of names){
       await executor.query(`INSERT INTO ${this._table('monkey_leads')} (id, name, created_at) VALUES ($1, $2, $3)`, [uuidv4(), name, timestamp]);
     }
+  }
+
+  async _listUsersByRole(role){
+    const normalizedRole = this._normalizeUserRole(role);
+    const usersTable = this._table('users');
+    const rows = await this._select(
+      `SELECT id, email, first_name, last_name, display_name, role, created_at, updated_at, last_login FROM ${usersTable} WHERE role = $1 ORDER BY lower(display_name), lower(email)`,
+      [normalizedRole]
+    );
+    return rows.map(row => this._mapUserRow(row));
   }
 
   async _persist(show, client = null){
@@ -798,6 +986,218 @@ class PostgresProvider {
 
   async _run(query, params = []){
     await this.pool.query(query, params);
+  }
+
+  async _getUserRowByEmail(email){
+    const normalized = this._normalizeEmail(email);
+    if(!normalized){
+      return null;
+    }
+    const usersTable = this._table('users');
+    return this._selectOne(
+      `SELECT id, email, first_name, last_name, display_name, role, password_hash, created_at, updated_at, last_login FROM ${usersTable} WHERE lower(email) = lower($1)` ,
+      [normalized]
+    );
+  }
+
+  async _getUserRowById(id){
+    if(!id){
+      return null;
+    }
+    const usersTable = this._table('users');
+    return this._selectOne(
+      `SELECT id, email, first_name, last_name, display_name, role, password_hash, created_at, updated_at, last_login FROM ${usersTable} WHERE id = $1` ,
+      [id]
+    );
+  }
+
+  _prepareUserProfile(input = {}){
+    const email = this._normalizeEmail(input.email);
+    if(!email){
+      const err = new Error('Email is required');
+      err.status = 400;
+      throw err;
+    }
+    this._assertSphereEmail(email);
+    const role = this._normalizeUserRole(input.role);
+    const names = this._resolveUserNames({
+      email,
+      firstName: input.firstName,
+      lastName: input.lastName
+    });
+    return {
+      email,
+      role,
+      ...names
+    };
+  }
+
+  _resolveUserNames({email, firstName, lastName} = {}){
+    const fallback = this._inferNamesFromEmail(email);
+    const normalizedFirst = this._normalizeNamePart(firstName) || fallback.firstName;
+    const normalizedLast = this._normalizeNamePart(lastName) || fallback.lastName;
+    return {
+      firstName: normalizedFirst,
+      lastName: normalizedLast,
+      displayName: this._buildDisplayName(normalizedFirst, normalizedLast, email)
+    };
+  }
+
+  _normalizeEmail(value){
+    if(typeof value !== 'string'){
+      return '';
+    }
+    const trimmed = value.trim();
+    return trimmed ? trimmed.toLowerCase() : '';
+  }
+
+  _normalizeNamePart(value){
+    if(typeof value !== 'string'){
+      return '';
+    }
+    const trimmed = value.trim();
+    if(!trimmed){
+      return '';
+    }
+    return trimmed
+      .split(/\s+/)
+      .map(segment => segment
+        .split('-')
+        .map(piece => piece ? piece.charAt(0).toUpperCase() + piece.slice(1).toLowerCase() : '')
+        .join('-'))
+      .join(' ');
+  }
+
+  _inferNamesFromEmail(email){
+    if(typeof email !== 'string'){
+      return {firstName: '', lastName: ''};
+    }
+    const localPart = email.split('@')[0] || '';
+    const segments = localPart.split('.').filter(Boolean);
+    if(segments.length === 0){
+      return {firstName: '', lastName: ''};
+    }
+    const firstName = this._normalizeNamePart(segments[0]);
+    const lastName = this._normalizeNamePart(segments.slice(1).join(' '));
+    return {firstName, lastName};
+  }
+
+  _buildDisplayName(firstName, lastName, email){
+    const parts = [];
+    if(firstName){ parts.push(firstName); }
+    if(lastName){ parts.push(lastName); }
+    if(parts.length){
+      return parts.join(' ');
+    }
+    return email;
+  }
+
+  _normalizeUserRole(role){
+    const value = typeof role === 'string' ? role.trim().toLowerCase() : '';
+    return value === 'pilot' ? 'pilot' : 'stagehand';
+  }
+
+  _assertSphereEmail(email){
+    if(typeof email !== 'string' || !email.toLowerCase().endsWith('@thesphere.com')){
+      const err = new Error('Email must use thesphere.com domain');
+      err.status = 400;
+      throw err;
+    }
+  }
+
+  _mapUserRow(row){
+    if(!row){
+      return null;
+    }
+    const createdAt = this._getTimestamp(row.created_at);
+    const updatedAt = this._getTimestamp(row.updated_at);
+    const lastLogin = this._getTimestamp(row.last_login);
+    return {
+      id: row.id,
+      email: row.email,
+      firstName: row.first_name || '',
+      lastName: row.last_name || '',
+      displayName: row.display_name || row.email,
+      role: row.role || 'stagehand',
+      createdAt,
+      updatedAt,
+      lastLogin
+    };
+  }
+
+  _hashPassword(password){
+    if(typeof password !== 'string' || !password){
+      const err = new Error('Password is required');
+      err.status = 400;
+      throw err;
+    }
+    const salt = crypto.randomBytes(16).toString('hex');
+    const derived = crypto.pbkdf2Sync(password, salt, PASSWORD_ITERATIONS, PASSWORD_KEY_LENGTH, PASSWORD_DIGEST);
+    return `${PASSWORD_ITERATIONS}:${salt}:${derived.toString('hex')}`;
+  }
+
+  _verifyPassword(password, stored){
+    if(typeof password !== 'string' || !password || typeof stored !== 'string' || !stored){
+      return false;
+    }
+    const parts = stored.split(':');
+    if(parts.length !== 3){
+      return false;
+    }
+    const iterations = Number.parseInt(parts[0], 10);
+    const salt = parts[1];
+    const hashHex = parts[2];
+    if(!salt || !hashHex){
+      return false;
+    }
+    const keyBuffer = Buffer.from(hashHex, 'hex');
+    if(!keyBuffer.length){
+      return false;
+    }
+    const derived = crypto.pbkdf2Sync(
+      password,
+      salt,
+      Number.isFinite(iterations) && iterations > 0 ? iterations : PASSWORD_ITERATIONS,
+      keyBuffer.length,
+      PASSWORD_DIGEST
+    );
+    return crypto.timingSafeEqual(keyBuffer, derived);
+  }
+
+  _generateTokenValue(){
+    return crypto.randomBytes(32).toString('hex');
+  }
+
+  async _revokeTokensForUser(userId){
+    if(!userId){
+      return;
+    }
+    await this._run(`DELETE FROM ${this._table('user_tokens')} WHERE user_id = $1`, [userId]);
+  }
+
+  async _seedDefaultUsers(){
+    let mutated = false;
+    for(const user of DEFAULT_USERS){
+      try{
+        const normalizedEmail = this._normalizeEmail(user.email);
+        if(!normalizedEmail){
+          continue;
+        }
+        const existing = await this._getUserRowByEmail(normalizedEmail);
+        if(existing){
+          continue;
+        }
+        await this.createUser({
+          email: normalizedEmail,
+          role: user.role,
+          password: user.password
+        });
+        mutated = true;
+      }catch(err){
+        console.warn('[storage] Failed to seed default user', user.email, err.message);
+      }
+    }
+    return mutated;
   }
 
   async _withClient(handler, {transaction = true} = {}){
@@ -1090,7 +1490,7 @@ class PostgresProvider {
       console.info(`[storage] PostgreSQL bootstrap automation created ${actions.join(', ')}`, context);
     }
     if(seededDefaults){
-      console.info('[storage] PostgreSQL default staff roster seeded');
+      console.info('[storage] PostgreSQL default user directory seeded');
     }
   }
 }
